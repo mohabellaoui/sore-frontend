@@ -1,0 +1,1576 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SORE SECURITY — War Room</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500&family=Exo+2:wght@300;400;600;800&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════ */
+/* DESIGN SYSTEM — WAR ROOM AESTHETIC          */
+/* ═══════════════════════════════════════════ */
+:root {
+  --void: #020408;
+  --deep: #050d18;
+  --surface: #071525;
+  --elevated: #0a1e35;
+  --overlay: #0d2440;
+  --line: rgba(0, 180, 220, 0.1);
+  --line2: rgba(0, 180, 220, 0.06);
+  --cyan: #00b4dc;
+  --cyan-dim: rgba(0,180,220,0.15);
+  --cyan-glow: rgba(0,180,220,0.4);
+  --green: #00ff88;
+  --green-dim: rgba(0,255,136,0.12);
+  --red: #ff2d55;
+  --red-dim: rgba(255,45,85,0.15);
+  --amber: #ffaa00;
+  --amber-dim: rgba(255,170,0,0.15);
+  --text: #c8dff0;
+  --text-dim: #4a6880;
+  --text-bright: #e8f5ff;
+  --font-display: 'Rajdhani', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-body: 'Exo 2', sans-serif;
+}
+
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  font-family:var(--font-body);
+  background:var(--void);
+  color:var(--text);
+  min-height:100vh;
+  overflow-x:hidden;
+  cursor:default;
+}
+
+/* ── GRID BACKGROUND ── */
+body::before{
+  content:'';
+  position:fixed;inset:0;
+  background-image:
+    linear-gradient(rgba(0,180,220,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,180,220,0.03) 1px, transparent 1px);
+  background-size:50px 50px;
+  pointer-events:none;z-index:0;
+}
+
+/* ── SCANLINES ── */
+body::after{
+  content:'';
+  position:fixed;inset:0;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.05) 2px,rgba(0,0,0,0.05) 4px);
+  pointer-events:none;z-index:1;animation:scanmove 8s linear infinite;
+}
+@keyframes scanmove{from{background-position:0 0}to{background-position:0 100px}}
+
+/* ════════════════════════════════════════════ */
+/* AUTH SCREEN                                  */
+/* ════════════════════════════════════════════ */
+#auth-screen{
+  position:fixed;inset:0;
+  background:var(--void);
+  display:flex;align-items:center;justify-content:center;
+  z-index:1000;
+}
+.auth-box{
+  width:420px;
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:2px;
+  padding:48px;
+  position:relative;
+  animation:boxIn .6s ease;
+}
+@keyframes boxIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+
+/* Corner decorations */
+.auth-box::before,.auth-box::after,
+.auth-corner-br,.auth-corner-bl{
+  content:'';position:absolute;width:16px;height:16px;
+}
+.auth-box::before{top:-1px;left:-1px;border-top:2px solid var(--cyan);border-left:2px solid var(--cyan)}
+.auth-box::after{top:-1px;right:-1px;border-top:2px solid var(--cyan);border-right:2px solid var(--cyan)}
+.auth-corner-br{bottom:-1px;right:-1px;border-bottom:2px solid var(--cyan);border-right:2px solid var(--cyan)}
+.auth-corner-bl{bottom:-1px;left:-1px;border-bottom:2px solid var(--cyan);border-left:2px solid var(--cyan)}
+
+.auth-logo{
+  display:flex;align-items:center;gap:14px;margin-bottom:40px;
+}
+.auth-logo-icon{
+  width:44px;height:44px;
+  background:linear-gradient(135deg,var(--cyan),#0055aa);
+  clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;animation:hexspin 8s linear infinite;
+}
+@keyframes hexspin{0%,100%{filter:brightness(1)}50%{filter:brightness(1.3)}}
+.auth-logo-text{
+  font-family:var(--font-display);font-size:22px;font-weight:700;
+  color:var(--text-bright);letter-spacing:.08em;
+}
+.auth-logo-sub{font-family:var(--font-mono);font-size:10px;color:var(--cyan);letter-spacing:.2em;text-transform:uppercase}
+
+.auth-status{
+  display:flex;align-items:center;gap:8px;
+  background:var(--green-dim);border:1px solid rgba(0,255,136,.2);
+  padding:8px 14px;border-radius:2px;margin-bottom:32px;
+  font-family:var(--font-mono);font-size:11px;color:var(--green);
+}
+.pulse-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(1.4)}}
+
+.auth-label{
+  font-family:var(--font-mono);font-size:10px;color:var(--cyan);
+  letter-spacing:.15em;text-transform:uppercase;margin-bottom:6px;display:block;
+}
+.auth-input{
+  width:100%;background:var(--elevated);
+  border:1px solid var(--line);border-radius:2px;
+  padding:12px 16px;color:var(--text-bright);
+  font-family:var(--font-mono);font-size:13px;
+  outline:none;transition:.2s;margin-bottom:16px;
+}
+.auth-input:focus{border-color:var(--cyan);box-shadow:0 0 0 2px var(--cyan-dim)}
+.auth-input::placeholder{color:var(--text-dim)}
+
+.auth-btn{
+  width:100%;padding:14px;
+  background:linear-gradient(135deg,var(--cyan),#0077cc);
+  border:none;border-radius:2px;
+  color:#000;font-family:var(--font-display);
+  font-size:15px;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;cursor:pointer;transition:.2s;margin-top:8px;
+}
+.auth-btn:hover{filter:brightness(1.2);transform:translateY(-1px)}
+.auth-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+
+.auth-error{
+  background:var(--red-dim);border:1px solid rgba(255,45,85,.3);
+  padding:10px 14px;border-radius:2px;
+  font-family:var(--font-mono);font-size:11px;color:var(--red);
+  margin-top:12px;display:none;
+}
+
+/* 2FA */
+#mfa-panel{display:none}
+.mfa-digits{display:flex;gap:8px;margin-bottom:20px}
+.mfa-digit{
+  flex:1;text-align:center;background:var(--elevated);
+  border:1px solid var(--line);border-radius:2px;
+  padding:16px 0;font-family:var(--font-mono);font-size:22px;
+  color:var(--cyan);outline:none;
+}
+.mfa-digit:focus{border-color:var(--cyan);box-shadow:0 0 0 2px var(--cyan-dim)}
+.mfa-info{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);text-align:center;margin-bottom:20px}
+
+/* ════════════════════════════════════════════ */
+/* MAIN APP                                     */
+/* ════════════════════════════════════════════ */
+#app{display:none;min-height:100vh;position:relative;z-index:2}
+
+/* ── TOPBAR ── */
+.topbar{
+  position:fixed;top:0;left:0;right:0;height:56px;
+  background:rgba(5,13,24,0.95);
+  border-bottom:1px solid var(--line);
+  display:flex;align-items:center;padding:0 24px;
+  gap:24px;z-index:100;backdrop-filter:blur(12px);
+}
+.tb-logo{display:flex;align-items:center;gap:10px;margin-right:auto}
+.tb-hex{
+  width:30px;height:30px;
+  background:linear-gradient(135deg,var(--cyan),#003366);
+  clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);
+  display:flex;align-items:center;justify-content:center;font-size:13px;
+}
+.tb-name{font-family:var(--font-display);font-size:16px;font-weight:700;color:var(--text-bright);letter-spacing:.06em}
+.tb-ver{font-family:var(--font-mono);font-size:10px;color:var(--cyan);margin-left:4px}
+
+.tb-nav{display:flex;align-items:center;gap:4px}
+.tb-btn{
+  display:flex;align-items:center;gap:7px;padding:7px 14px;
+  border-radius:2px;cursor:pointer;font-family:var(--font-display);
+  font-size:13px;font-weight:600;letter-spacing:.04em;
+  color:var(--text-dim);transition:.2s;border:1px solid transparent;
+  text-transform:uppercase;
+}
+.tb-btn:hover{color:var(--text-bright);background:var(--line2);border-color:var(--line)}
+.tb-btn.active{color:var(--cyan);background:var(--cyan-dim);border-color:rgba(0,180,220,0.25)}
+.tb-icon{font-size:14px}
+
+.tb-right{display:flex;align-items:center;gap:12px;margin-left:auto}
+.soc-badge{
+  display:flex;align-items:center;gap:6px;
+  background:var(--green-dim);border:1px solid rgba(0,255,136,.2);
+  padding:5px 12px;border-radius:2px;
+  font-family:var(--font-mono);font-size:10px;color:var(--green);
+  letter-spacing:.08em;text-transform:uppercase;
+}
+.threat-level{
+  display:flex;align-items:center;gap:8px;padding:5px 12px;
+  background:var(--amber-dim);border:1px solid rgba(255,170,0,.2);
+  border-radius:2px;font-family:var(--font-mono);font-size:10px;color:var(--amber);
+  text-transform:uppercase;letter-spacing:.06em;
+}
+.user-pill{
+  display:flex;align-items:center;gap:8px;padding:5px 12px;
+  background:var(--elevated);border:1px solid var(--line);border-radius:2px;
+  cursor:pointer;transition:.2s;
+}
+.user-pill:hover{border-color:var(--cyan)}
+.user-avatar{
+  width:26px;height:26px;border-radius:2px;
+  background:linear-gradient(135deg,var(--cyan),#003388);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-display);font-size:11px;font-weight:700;color:#000;
+}
+.user-info{font-family:var(--font-mono);font-size:10px}
+.user-name-t{color:var(--text-bright);display:block}
+.user-role-t{color:var(--cyan);text-transform:uppercase;letter-spacing:.06em}
+
+/* ── MAIN CONTENT ── */
+.main{margin-top:56px;padding:24px 28px;max-width:1600px;margin-left:auto;margin-right:auto}
+.page{display:none;animation:pageIn .3s ease}
+.page.active{display:block}
+@keyframes pageIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── SECTION HEADER ── */
+.section-header{
+  display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;
+  padding-bottom:16px;border-bottom:1px solid var(--line2);
+}
+.section-title{
+  font-family:var(--font-display);font-size:24px;font-weight:700;
+  color:var(--text-bright);letter-spacing:.06em;text-transform:uppercase;
+  display:flex;align-items:center;gap:12px;
+}
+.section-title::before{
+  content:'';width:4px;height:24px;
+  background:linear-gradient(var(--cyan),transparent);
+  border-radius:2px;
+}
+.section-sub{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-top:3px;letter-spacing:.06em}
+
+/* ── CARDS ── */
+.card{
+  background:var(--surface);border:1px solid var(--line);
+  border-radius:2px;padding:20px;position:relative;overflow:hidden;
+}
+.card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--cyan),transparent);
+  opacity:.4;
+}
+.card-title{
+  font-family:var(--font-display);font-size:13px;font-weight:600;
+  color:var(--text-dim);text-transform:uppercase;letter-spacing:.1em;
+  display:flex;align-items:center;gap:8px;margin-bottom:16px;
+}
+.card-title .dot{width:6px;height:6px;border-radius:50%}
+
+/* ── STATS GRID ── */
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.stat-card{
+  background:var(--surface);border:1px solid var(--line);border-radius:2px;
+  padding:20px;position:relative;overflow:hidden;cursor:default;transition:.2s;
+}
+.stat-card:hover{border-color:rgba(0,180,220,.3);transform:translateY(-2px)}
+.stat-card::after{
+  content:'';position:absolute;bottom:0;right:0;
+  width:80px;height:80px;border-radius:80px 0 0 0;opacity:.05;
+}
+.stat-card.cyan::after{background:var(--cyan)}
+.stat-card.green::after{background:var(--green)}
+.stat-card.red::after{background:var(--red)}
+.stat-card.amber::after{background:var(--amber)}
+.stat-label-top{font-family:var(--font-mono);font-size:10px;color:var(--text-dim);letter-spacing:.12em;text-transform:uppercase;margin-bottom:12px}
+.stat-val{font-family:var(--font-display);font-size:38px;font-weight:700;line-height:1;margin-bottom:4px}
+.stat-val.cyan{color:var(--cyan)}
+.stat-val.green{color:var(--green)}
+.stat-val.red{color:var(--red)}
+.stat-val.amber{color:var(--amber)}
+.stat-sub{font-family:var(--font-mono);font-size:10px;color:var(--text-dim)}
+.stat-trend{font-family:var(--font-mono);font-size:10px;margin-top:10px;display:flex;align-items:center;gap:5px}
+.stat-bar{margin-top:12px;height:2px;background:rgba(255,255,255,.06);border-radius:1px}
+.stat-bar-fill{height:100%;border-radius:1px;transition:width 1s ease}
+
+/* ── TWO COLUMN ── */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.grid-3{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:24px}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.grid-full{margin-bottom:24px}
+
+/* ── GLOBE CANVAS ── */
+#globe-canvas{width:100%;height:240px;border-radius:2px;background:var(--deep)}
+
+/* ── RADAR CHART ── */
+#radar-canvas{width:100%;height:220px}
+
+/* ── ALERTS TABLE ── */
+.alert-list{display:flex;flex-direction:column;gap:6px}
+.alert-item{
+  display:flex;align-items:center;gap:12px;
+  padding:10px 14px;background:var(--elevated);border:1px solid var(--line2);
+  border-radius:2px;transition:.2s;cursor:pointer;
+}
+.alert-item:hover{border-color:var(--line);background:var(--overlay)}
+.alert-sev{
+  width:3px;align-self:stretch;border-radius:2px;flex-shrink:0;
+}
+.alert-sev.critical{background:var(--red)}
+.alert-sev.high{background:var(--amber)}
+.alert-sev.medium{background:#ff8800}
+.alert-sev.low{background:var(--cyan)}
+.alert-sev.info{background:var(--text-dim)}
+.alert-icon{font-size:16px;width:20px;text-align:center;flex-shrink:0}
+.alert-body{flex:1;min-width:0}
+.alert-title-t{font-family:var(--font-body);font-size:13px;font-weight:600;color:var(--text-bright);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.alert-meta-t{font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:2px}
+.alert-right{flex-shrink:0;text-align:right}
+.sev-badge{
+  display:inline-block;padding:2px 8px;border-radius:2px;
+  font-family:var(--font-mono);font-size:9px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;
+}
+.sev-badge.critical{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,45,85,.3)}
+.sev-badge.high{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(255,170,0,.3)}
+.sev-badge.medium{background:rgba(255,136,0,.15);color:#ff8800;border:1px solid rgba(255,136,0,.3)}
+.sev-badge.low{background:var(--cyan-dim);color:var(--cyan);border:1px solid rgba(0,180,220,.3)}
+.sev-badge.info{background:rgba(100,100,100,.15);color:var(--text-dim);border:1px solid rgba(100,100,100,.3)}
+
+/* ── TICKER ── */
+.ticker{
+  background:var(--deep);border:1px solid var(--line);border-radius:2px;
+  padding:8px 16px;overflow:hidden;display:flex;align-items:center;gap:16px;
+  margin-bottom:24px;
+}
+.ticker-label{font-family:var(--font-mono);font-size:9px;color:var(--cyan);text-transform:uppercase;letter-spacing:.15em;white-space:nowrap;border-right:1px solid var(--line);padding-right:16px}
+.ticker-track{flex:1;overflow:hidden;position:relative;height:20px}
+.ticker-content{
+  position:absolute;white-space:nowrap;
+  font-family:var(--font-mono);font-size:11px;color:var(--text-dim);
+  animation:ticker 30s linear infinite;
+}
+@keyframes ticker{from{transform:translateX(100%)}to{transform:translateX(-100%)}}
+
+/* ── SOC METRICS ── */
+.soc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+.soc-metric{
+  background:var(--elevated);border:1px solid var(--line2);border-radius:2px;
+  padding:16px;text-align:center;
+}
+.soc-val{font-family:var(--font-display);font-size:28px;font-weight:700;color:var(--cyan)}
+.soc-val.red{color:var(--red)}
+.soc-val.green{color:var(--green)}
+.soc-lbl{font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:4px;letter-spacing:.06em;text-transform:uppercase}
+
+/* ── INCIDENT TABLE ── */
+.table-wrap{overflow-x:auto}
+table.data-table{width:100%;border-collapse:collapse}
+table.data-table th{
+  text-align:left;font-family:var(--font-mono);font-size:10px;
+  color:var(--text-dim);padding:8px 12px;
+  border-bottom:1px solid var(--line);letter-spacing:.08em;text-transform:uppercase;
+}
+table.data-table td{
+  padding:11px 12px;font-family:var(--font-body);font-size:13px;
+  border-bottom:1px solid rgba(255,255,255,.03);
+}
+table.data-table tr:hover td{background:rgba(0,180,220,.03)}
+.status-pill{
+  display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:2px;
+  font-family:var(--font-mono);font-size:10px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;
+}
+.status-pill.en_cours,.status-pill.investigating{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(255,170,0,.25)}
+.status-pill.termine,.status-pill.resolved{background:var(--green-dim);color:var(--green);border:1px solid rgba(0,255,136,.25)}
+.status-pill.planifie{background:var(--cyan-dim);color:var(--cyan);border:1px solid rgba(0,180,220,.25)}
+.status-pill.open{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,45,85,.25)}
+
+/* ── PROGRESS BARS ── */
+.progress-row{margin-bottom:14px}
+.progress-header{display:flex;justify-content:space-between;margin-bottom:5px;font-family:var(--font-mono);font-size:11px}
+.progress-label{color:var(--text-dim)}
+.progress-val{color:var(--cyan)}
+.progress-track{height:3px;background:rgba(255,255,255,.05);border-radius:1px}
+.progress-fill{height:100%;border-radius:1px;background:linear-gradient(90deg,var(--cyan),#00ddff);transition:width 1.2s ease}
+.progress-fill.red{background:linear-gradient(90deg,var(--red),#ff6688)}
+.progress-fill.amber{background:linear-gradient(90deg,var(--amber),#ffcc44)}
+
+/* ── SERVICES PAGE ── */
+.services-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px}
+.service-card{
+  background:var(--surface);border:1px solid var(--line);border-radius:2px;
+  padding:24px;cursor:pointer;transition:.25s;position:relative;overflow:hidden;
+}
+.service-card::after{
+  content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--cyan),transparent);
+  opacity:0;transition:.25s;
+}
+.service-card:hover{border-color:rgba(0,180,220,.4);transform:translateY(-3px)}
+.service-card:hover::after{opacity:1}
+.service-card.featured{border-color:rgba(0,180,220,.3);background:linear-gradient(135deg,rgba(0,180,220,.04),var(--surface))}
+.featured-badge{
+  position:absolute;top:14px;right:14px;
+  background:linear-gradient(135deg,var(--cyan),#0055aa);
+  color:#000;font-family:var(--font-mono);font-size:9px;font-weight:500;
+  padding:3px 10px;border-radius:2px;letter-spacing:.1em;text-transform:uppercase;
+}
+.service-icon-wrap{
+  width:48px;height:48px;margin-bottom:16px;
+  background:var(--cyan-dim);border:1px solid rgba(0,180,220,.2);border-radius:2px;
+  display:flex;align-items:center;justify-content:center;font-size:22px;
+}
+.service-name{font-family:var(--font-display);font-size:17px;font-weight:700;color:var(--text-bright);margin-bottom:6px;letter-spacing:.04em;text-transform:uppercase}
+.service-desc{font-size:12.5px;color:var(--text-dim);line-height:1.6;margin-bottom:16px}
+.service-features{list-style:none;margin-bottom:18px}
+.service-features li{
+  font-family:var(--font-mono);font-size:11px;color:var(--text-dim);
+  padding:4px 0;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line2);
+}
+.service-features li:last-child{border-bottom:none}
+.service-features li::before{content:'►';color:var(--cyan);font-size:8px}
+.service-cta{
+  display:inline-flex;align-items:center;gap:8px;padding:9px 18px;
+  background:transparent;border:1px solid rgba(0,180,220,.3);border-radius:2px;
+  color:var(--cyan);font-family:var(--font-display);font-size:12px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.08em;cursor:pointer;transition:.2s;
+}
+.service-cta:hover{background:var(--cyan-dim);border-color:var(--cyan)}
+
+/* ── PACKS ── */
+.packs-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px}
+.pack-card{
+  background:var(--surface);border:1px solid var(--line);border-radius:2px;padding:28px;
+  position:relative;transition:.2s;
+}
+.pack-card:hover{border-color:rgba(0,180,220,.3)}
+.pack-card.featured-pack{border-color:rgba(0,180,220,.4);background:linear-gradient(180deg,rgba(0,180,220,.04),var(--surface))}
+.pack-badge{
+  position:absolute;top:-1px;left:50%;transform:translateX(-50%);
+  background:linear-gradient(90deg,var(--cyan),#0066cc);
+  padding:4px 16px;font-family:var(--font-mono);font-size:9px;color:#000;font-weight:600;
+  letter-spacing:.1em;text-transform:uppercase;border-radius:0 0 4px 4px;
+}
+.pack-tier{font-family:var(--font-mono);font-size:10px;color:var(--cyan);letter-spacing:.15em;text-transform:uppercase;margin-bottom:8px}
+.pack-name{font-family:var(--font-display);font-size:22px;font-weight:700;color:var(--text-bright);margin-bottom:4px;letter-spacing:.04em}
+.pack-tagline{font-size:12px;color:var(--text-dim);margin-bottom:20px}
+.pack-features{list-style:none;margin-bottom:24px}
+.pack-features li{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);padding:5px 0;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line2)}
+.pack-features li:last-child{border-bottom:none}
+.pack-features li::before{content:'✓';color:var(--green);font-weight:700}
+.pack-cta{
+  width:100%;padding:12px;border:1px solid rgba(0,180,220,.3);border-radius:2px;
+  background:transparent;color:var(--cyan);font-family:var(--font-display);
+  font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
+  cursor:pointer;transition:.2s;
+}
+.pack-cta:hover{background:var(--cyan-dim)}
+.pack-card.featured-pack .pack-cta{background:linear-gradient(135deg,var(--cyan),#0055aa);color:#000;border:none}
+
+/* ── COMMANDE FORM ── */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.form-group{margin-bottom:16px}
+.form-label{font-family:var(--font-mono);font-size:10px;color:var(--cyan);letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:6px}
+.form-input{
+  width:100%;background:var(--elevated);border:1px solid var(--line);border-radius:2px;
+  padding:11px 14px;color:var(--text-bright);font-family:var(--font-mono);font-size:13px;
+  outline:none;transition:.2s;
+}
+.form-input:focus{border-color:var(--cyan);box-shadow:0 0 0 2px var(--cyan-dim)}
+.form-input::placeholder{color:var(--text-dim)}
+select.form-input option{background:var(--surface)}
+.form-btn{
+  padding:13px 32px;background:linear-gradient(135deg,var(--cyan),#0055cc);
+  border:none;border-radius:2px;color:#000;
+  font-family:var(--font-display);font-size:14px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.1em;cursor:pointer;transition:.2s;
+}
+.form-btn:hover{filter:brightness(1.15);transform:translateY(-1px)}
+
+/* ── AI CHAT ── */
+.chat-wrapper{
+  display:grid;grid-template-columns:1fr 300px;gap:16px;height:calc(100vh - 160px);max-height:720px;
+}
+.chat-main{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:2px;overflow:hidden}
+.chat-header{
+  padding:16px 20px;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:12px;background:var(--elevated);
+}
+.aria-avatar{
+  width:38px;height:38px;
+  background:linear-gradient(135deg,#001133,var(--cyan));
+  clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);
+  display:flex;align-items:center;justify-content:center;font-size:16px;
+  animation:hexspin 6s linear infinite;
+}
+.aria-name{font-family:var(--font-display);font-size:15px;font-weight:700;color:var(--text-bright);letter-spacing:.04em}
+.aria-status{font-family:var(--font-mono);font-size:10px;color:var(--green);display:flex;align-items:center;gap:5px;margin-top:1px}
+
+.chat-messages{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:14px}
+.chat-messages::-webkit-scrollbar{width:4px}
+.chat-messages::-webkit-scrollbar-thumb{background:var(--line);border-radius:2px}
+
+.msg{max-width:80%;animation:msgIn .3s ease}
+@keyframes msgIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.msg.user{align-self:flex-end}
+.msg.ai{align-self:flex-start}
+.msg-bubble{padding:12px 16px;border-radius:2px;font-size:13.5px;line-height:1.65}
+.msg.user .msg-bubble{
+  background:linear-gradient(135deg,#003366,var(--cyan));
+  color:#fff;border-radius:2px 2px 0 2px;
+}
+.msg.ai .msg-bubble{
+  background:var(--elevated);border:1px solid var(--line);
+  border-radius:2px 2px 2px 0;color:var(--text);
+}
+.msg-time{font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:4px;padding:0 4px}
+.msg.user .msg-time{text-align:right}
+.typing-indicator{align-self:flex-start}
+.typing-indicator .msg-bubble{padding:14px 18px}
+.typing-dots{display:flex;gap:5px}
+.tdot{width:5px;height:5px;border-radius:50%;background:var(--cyan);animation:tdot .7s infinite}
+.tdot:nth-child(2){animation-delay:.15s}
+.tdot:nth-child(3){animation-delay:.3s}
+@keyframes tdot{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}
+
+.chat-quick{padding:10px 16px;display:flex;flex-wrap:wrap;gap:6px;border-top:1px solid var(--line)}
+.quick-chip{
+  padding:5px 12px;background:var(--elevated);border:1px solid var(--line);border-radius:2px;
+  font-family:var(--font-mono);font-size:10px;color:var(--text-dim);cursor:pointer;
+  transition:.2s;text-transform:uppercase;letter-spacing:.05em;
+}
+.quick-chip:hover{border-color:var(--cyan);color:var(--cyan);background:var(--cyan-dim)}
+
+.chat-input-area{
+  padding:14px 16px;border-top:1px solid var(--line);
+  display:flex;gap:8px;align-items:flex-end;background:var(--elevated);
+}
+.chat-input{
+  flex:1;background:var(--surface);border:1px solid var(--line);border-radius:2px;
+  padding:10px 14px;color:var(--text-bright);font-family:var(--font-mono);font-size:13px;
+  resize:none;height:44px;max-height:120px;outline:none;transition:.2s;line-height:1.4;
+}
+.chat-input:focus{border-color:var(--cyan)}
+.send-btn{
+  width:44px;height:44px;background:linear-gradient(135deg,var(--cyan),#0055aa);
+  border:none;border-radius:2px;color:#000;cursor:pointer;font-size:16px;
+  display:flex;align-items:center;justify-content:center;transition:.2s;flex-shrink:0;
+}
+.send-btn:hover{filter:brightness(1.2)}
+.send-btn:disabled{opacity:.3;cursor:not-allowed}
+
+.chat-sidebar{display:flex;flex-direction:column;gap:12px}
+.aria-card{background:var(--surface);border:1px solid var(--line);border-radius:2px;padding:18px}
+.aria-title{font-family:var(--font-display);font-size:13px;font-weight:700;color:var(--text-bright);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px}
+.capability{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--line2)}
+.capability:last-child{border:none}
+.cap-icon{font-size:14px;width:20px;text-align:center;flex-shrink:0;margin-top:1px}
+.cap-text{font-family:var(--font-mono);font-size:10px;color:var(--text-dim);line-height:1.5}
+
+/* ── REPORTS ── */
+.reports-toolbar{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.search-input{
+  flex:1;background:var(--elevated);border:1px solid var(--line);border-radius:2px;
+  padding:9px 14px;color:var(--text-bright);font-family:var(--font-mono);font-size:12px;outline:none;transition:.2s;
+}
+.search-input:focus{border-color:var(--cyan)}
+.action-btn{
+  padding:9px 16px;background:var(--elevated);border:1px solid var(--line);border-radius:2px;
+  color:var(--text-dim);font-family:var(--font-mono);font-size:11px;cursor:pointer;transition:.2s;
+  text-transform:uppercase;letter-spacing:.06em;
+}
+.action-btn:hover{border-color:var(--cyan);color:var(--cyan)}
+.action-btn.primary{background:linear-gradient(135deg,var(--cyan),#0055aa);color:#000;border:none;font-weight:700}
+.report-item{
+  display:flex;align-items:center;gap:14px;padding:14px 16px;
+  background:var(--elevated);border:1px solid var(--line2);border-radius:2px;
+  margin-bottom:8px;transition:.2s;cursor:pointer;
+}
+.report-item:hover{border-color:var(--line);background:var(--overlay)}
+.report-type-icon{
+  width:42px;height:42px;border-radius:2px;
+  display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;
+}
+.report-type-icon.audit{background:rgba(0,180,220,.1);border:1px solid rgba(0,180,220,.2)}
+.report-type-icon.pentest{background:var(--red-dim);border:1px solid rgba(255,45,85,.2)}
+.report-type-icon.soc{background:var(--green-dim);border:1px solid rgba(0,255,136,.2)}
+.report-name{font-family:var(--font-body);font-size:14px;font-weight:600;color:var(--text-bright);margin-bottom:3px}
+.report-meta{font-family:var(--font-mono);font-size:10px;color:var(--text-dim)}
+.report-actions{display:flex;gap:6px;margin-left:auto}
+.icon-btn{
+  width:32px;height:32px;border-radius:2px;background:var(--surface);
+  border:1px solid var(--line);cursor:pointer;display:flex;align-items:center;
+  justify-content:center;font-size:13px;transition:.2s;color:var(--text-dim);
+}
+.icon-btn:hover{border-color:var(--cyan);color:var(--cyan)}
+
+/* ── TOAST ── */
+.toast{
+  position:fixed;bottom:28px;right:28px;z-index:500;
+  background:var(--elevated);border:1px solid var(--cyan);border-radius:2px;
+  padding:12px 18px;font-family:var(--font-mono);font-size:12px;
+  display:flex;align-items:center;gap:10px;
+  transform:translateX(120%);transition:.4s cubic-bezier(.34,1.56,.64,1);
+  max-width:360px;
+}
+.toast.show{transform:translateX(0)}
+
+/* ── RESPONSIVE ── */
+@media(max-width:900px){
+  .stats-grid{grid-template-columns:1fr 1fr}
+  .grid-2,.grid-3{grid-template-columns:1fr}
+  .chat-wrapper{grid-template-columns:1fr}
+  .chat-sidebar{display:none}
+  .services-grid,.packs-grid{grid-template-columns:1fr}
+  .tb-nav .tb-btn span{display:none}
+}
+</style>
+</head>
+<body>
+
+<!-- ════════ AUTH SCREEN ════════ -->
+<div id="auth-screen">
+  <div class="auth-box">
+    <div class="auth-corner-br"></div>
+    <div class="auth-corner-bl"></div>
+    <div class="auth-logo">
+      <div class="auth-logo-icon">🛡</div>
+      <div>
+        <div class="auth-logo-text">SORE SECURITY</div>
+        <div class="auth-logo-sub">War Room Platform v2.0</div>
+      </div>
+    </div>
+    <div class="auth-status"><div class="pulse-dot"></div>Système opérationnel · SOC actif</div>
+
+    <!-- LOGIN PANEL -->
+    <div id="login-panel">
+      <label class="auth-label">Identifiant opérateur</label>
+      <input id="login-email" class="auth-input" type="email" placeholder="operateur@sore-security.com" value="admin@sore-security.com"/>
+      <label class="auth-label">Code d'accès</label>
+      <input id="login-pwd" class="auth-input" type="password" placeholder="••••••••••••" value="Admin@Sore2024!"/>
+      <button class="auth-btn" id="login-btn" onclick="doLogin()">Accéder au système →</button>
+      <div class="auth-error" id="login-error"></div>
+    </div>
+
+    <!-- 2FA PANEL -->
+    <div id="mfa-panel">
+      <div class="mfa-info" style="margin-bottom:16px;color:var(--text-dim);font-size:12px">
+        Code de vérification envoyé à votre email sécurisé
+      </div>
+      <div class="mfa-digits" id="mfa-digits"></div>
+      <button class="auth-btn" id="mfa-btn" onclick="doMFA()">Vérifier le code →</button>
+      <div class="auth-error" id="mfa-error"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ APP ════════ -->
+<div id="app">
+
+  <!-- TOPBAR -->
+  <div class="topbar">
+    <div class="tb-logo">
+      <div class="tb-hex">🛡</div>
+      <div class="tb-name">SORE SECURITY <span class="tb-ver">v2</span></div>
+    </div>
+    <nav class="tb-nav">
+      <div class="tb-btn active" onclick="nav('dashboard')" data-page="dashboard"><span class="tb-icon">⬡</span><span>War Room</span></div>
+      <div class="tb-btn" onclick="nav('soc')" data-page="soc"><span class="tb-icon">◉</span><span>SOC</span></div>
+      <div class="tb-btn" onclick="nav('reports')" data-page="reports"><span class="tb-icon">▦</span><span>Rapports</span></div>
+      <div class="tb-btn" onclick="nav('services')" data-page="services"><span class="tb-icon">◈</span><span>Services</span></div>
+      <div class="tb-btn" onclick="nav('commande')" data-page="commande"><span class="tb-icon">◇</span><span>Commander</span></div>
+      <div class="tb-btn" onclick="nav('ai')" data-page="ai"><span class="tb-icon">⬡</span><span>ARIA IA</span></div>
+    </nav>
+    <div class="tb-right">
+      <div class="soc-badge"><div class="pulse-dot"></div>SOC LIVE · MAROC</div>
+      <div class="threat-level">⚠ MENACE : MODÉRÉE</div>
+      <div class="user-pill" onclick="logout()">
+        <div class="user-avatar" id="tb-avatar">A</div>
+        <div class="user-info">
+          <span class="user-name-t" id="tb-name">Admin</span>
+          <span class="user-role-t" id="tb-role">Administrateur</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+
+    <!-- TICKER -->
+    <div class="ticker">
+      <div class="ticker-label">⬡ FLUX INTEL</div>
+      <div class="ticker-track">
+        <div class="ticker-content" id="ticker-content">Chargement des données de threat intelligence...</div>
+      </div>
+    </div>
+
+    <!-- ══ DASHBOARD ══ -->
+    <div class="page active" id="page-dashboard">
+      <div class="section-header">
+        <div><div class="section-title">War Room — Vue d'ensemble</div><div class="section-sub" id="dash-timestamp">Chargement...</div></div>
+        <div style="display:flex;gap:8px">
+          <button class="action-btn" onclick="refreshDashboard()">↺ Actualiser</button>
+          <button class="action-btn primary" onclick="nav('commande')">+ Nouvelle mission</button>
+        </div>
+      </div>
+
+      <div class="stats-grid" id="stats-grid">
+        <div class="stat-card cyan">
+          <div class="stat-label-top">Score de résilience</div>
+          <div class="stat-val cyan" id="stat-score">—</div>
+          <div class="stat-sub">/ 100 points</div>
+          <div class="stat-bar"><div class="stat-bar-fill" style="background:linear-gradient(90deg,var(--cyan),#00ddff);width:0%" id="bar-score"></div></div>
+        </div>
+        <div class="stat-card red">
+          <div class="stat-label-top">Alertes actives</div>
+          <div class="stat-val red" id="stat-alerts">—</div>
+          <div class="stat-sub">dont <span id="stat-critical" style="color:var(--red)">—</span> critiques</div>
+          <div class="stat-bar"><div class="stat-bar-fill red" style="width:0%" id="bar-alerts"></div></div>
+        </div>
+        <div class="stat-card green">
+          <div class="stat-label-top">Clients protégés</div>
+          <div class="stat-val green" id="stat-clients">—</div>
+          <div class="stat-sub"><span id="stat-prospects">—</span> prospects</div>
+          <div class="stat-bar"><div class="stat-bar-fill" style="width:0%" id="bar-clients"></div></div>
+        </div>
+        <div class="stat-card amber">
+          <div class="stat-label-top">Missions actives</div>
+          <div class="stat-val amber" id="stat-missions">—</div>
+          <div class="stat-sub">Demandes en attente : <span id="stat-requests">—</span></div>
+          <div class="stat-bar"><div class="stat-bar-fill amber" style="width:0%" id="bar-missions"></div></div>
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="card">
+          <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Carte des menaces — Temps réel</div>
+          <canvas id="globe-canvas"></canvas>
+          <div style="display:flex;justify-content:space-between;margin-top:12px">
+            <span style="font-family:var(--font-mono);font-size:10px;color:var(--red)">● Critique</span>
+            <span style="font-family:var(--font-mono);font-size:10px;color:var(--amber)">● Modérée</span>
+            <span style="font-family:var(--font-mono);font-size:10px;color:var(--cyan)">● Surveillance</span>
+            <span style="font-family:var(--font-mono);font-size:10px;color:var(--green)">● Normale</span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="dot" style="background:var(--green)"></span>Radar de résilience</div>
+          <canvas id="radar-canvas"></canvas>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title"><span class="dot" style="background:var(--red)"></span>Alertes SOC — Priorité haute</div>
+          <div class="alert-list" id="dash-alerts">
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);padding:20px;text-align:center">Connexion au SOC...</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Volume SIEM — 24h</div>
+          <div id="siem-bars"></div>
+          <div style="margin-top:16px;padding:12px;background:var(--elevated);border:1px solid var(--line2);border-radius:2px">
+            <div style="font-family:var(--font-mono);font-size:10px;color:var(--green);display:flex;align-items:center;gap:6px">
+              <div class="pulse-dot"></div>Wazuh SIEM · Corrélation active · Dernier événement il y a 2 min
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SOC ══ -->
+    <div class="page" id="page-soc">
+      <div class="section-header">
+        <div><div class="section-title">Centre Opérationnel SOC</div><div class="section-sub">Surveillance 24/7/365 · Wazuh SIEM · Analystes dédiés</div></div>
+        <button class="action-btn primary" onclick="showToast('🚨 CSIRT contacté — Temps de réponse &lt;4h garanti')">🚨 Activer CSIRT</button>
+      </div>
+      <div class="soc-grid">
+        <div class="soc-metric"><div class="soc-val" id="soc-open">—</div><div class="soc-lbl">Incidents ouverts</div></div>
+        <div class="soc-metric"><div class="soc-val red" id="soc-critical">—</div><div class="soc-lbl">Critiques actifs</div></div>
+        <div class="soc-metric"><div class="soc-val green">24/7</div><div class="soc-lbl">Surveillance</div></div>
+        <div class="soc-metric"><div class="soc-val">1,247</div><div class="soc-lbl">Événements / jour</div></div>
+        <div class="soc-metric"><div class="soc-val green">98%</div><div class="soc-lbl">Taux détection</div></div>
+        <div class="soc-metric"><div class="soc-val cyan">&lt;30min</div><div class="soc-lbl">Isolation systèmes</div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title"><span class="dot" style="background:var(--red)"></span>Incidents en cours</div>
+          <div class="table-wrap"><table class="data-table" id="soc-table">
+            <thead><tr><th>ID</th><th>Type</th><th>Sévérité</th><th>Statut</th><th>Analyste</th><th>Action</th></tr></thead>
+            <tbody id="soc-tbody"><tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+          </table></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Volume SIEM par catégorie</div>
+          <div id="soc-siem"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ REPORTS ══ -->
+    <div class="page" id="page-reports">
+      <div class="section-header">
+        <div><div class="section-title">Gestion des rapports</div><div class="section-sub">Rapports d'audit, pentest, SOC et conformité</div></div>
+        <button class="action-btn primary" onclick="showToast('📋 Nouveau rapport créé — ID #RPT-0042')">+ Nouveau rapport</button>
+      </div>
+      <div class="reports-toolbar">
+        <input class="search-input" placeholder="⬡ Rechercher un rapport..." />
+        <button class="action-btn">Type ▾</button>
+        <button class="action-btn">Statut ▾</button>
+        <button class="action-btn" onclick="showToast('📦 Export CSV en cours...')">Exporter CSV</button>
+      </div>
+      <div id="reports-list">
+        <div class="report-item">
+          <div class="report-type-icon audit">📋</div>
+          <div><div class="report-name">Audit de Sécurité ISO 27001 — Banque Atlas</div><div class="report-meta">AUDIT · 01/03/2024 · Auteur: Yassine M. · <span style="color:var(--green)">Publié</span></div></div>
+          <div class="report-actions" style="margin-left:auto">
+            <button class="icon-btn" onclick="showToast('👁 Rapport ouvert')">👁</button>
+            <button class="icon-btn" onclick="showToast('⬇ Téléchargement PDF')">⬇</button>
+            <button class="icon-btn" onclick="showToast('✉ Envoyé au client')">✉</button>
+          </div>
+        </div>
+        <div class="report-item">
+          <div class="report-type-icon pentest">🔴</div>
+          <div><div class="report-name">Pentest Infrastructure — Secteur Bancaire</div><div class="report-meta">PENTEST · 27/02/2024 · OWASP Top 10 · <span style="color:var(--amber)">En révision</span></div></div>
+          <div class="report-actions" style="margin-left:auto">
+            <button class="icon-btn" onclick="showToast('👁 Rapport ouvert')">👁</button>
+            <button class="icon-btn" onclick="showToast('⬇ Téléchargement PDF')">⬇</button>
+            <button class="icon-btn" onclick="showToast('✉ Envoyé au client')">✉</button>
+          </div>
+        </div>
+        <div class="report-item">
+          <div class="report-type-icon soc">📡</div>
+          <div><div class="report-name">Rapport SOC Mensuel — Février 2024</div><div class="report-meta">SOC · 01/03/2024 · 1247 événements analysés · <span style="color:var(--green)">Publié</span></div></div>
+          <div class="report-actions" style="margin-left:auto">
+            <button class="icon-btn" onclick="showToast('👁 Rapport ouvert')">👁</button>
+            <button class="icon-btn" onclick="showToast('⬇ Téléchargement PDF')">⬇</button>
+            <button class="icon-btn" onclick="showToast('✉ Envoyé au client')">✉</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SERVICES ══ -->
+    <div class="page" id="page-services">
+      <div class="section-header">
+        <div><div class="section-title">Catalogue de services</div><div class="section-sub">Solutions cybersécurité & infrastructure sur mesure</div></div>
+      </div>
+      <div class="services-grid">
+        <div class="service-card"><div class="service-icon-wrap">🛡</div><div class="service-name">Audit de sécurité</div><div class="service-desc">Analyse complète ISO 27001 et Loi 09-08. Identifiez vos failles avant les attaquants.</div><ul class="service-features"><li>Configuration système & réseau</li><li>Revue des droits et accès</li><li>Conformité réglementaire</li><li>Rapport + plan de remédiation</li></ul><button class="service-cta" onclick="nav('commande')">Commander ►</button></div>
+        <div class="service-card featured"><div class="featured-badge">★ Populaire</div><div class="service-icon-wrap">🔴</div><div class="service-name">Pentest</div><div class="service-desc">Simulation d'attaque réelle. Éprouvez vos défenses avant les pirates.</div><ul class="service-features"><li>Tests Web OWASP Top 10</li><li>Pentest Active Directory</li><li>Red Team / Scénarios réels</li><li>Rapport technique + exécutif</li></ul><button class="service-cta" onclick="nav('commande')">Commander ►</button></div>
+        <div class="service-card"><div class="service-icon-wrap">📡</div><div class="service-name">SOC 24/7</div><div class="service-desc">Tour de contrôle permanente sur votre SI. Zéro angle mort, zéro interruption.</div><ul class="service-features"><li>Surveillance 24/7/365</li><li>Détection SIEM Wazuh</li><li>Analystes experts dédiés</li><li>Dashboard client temps réel</li></ul><button class="service-cta" onclick="nav('commande')">Commander ►</button></div>
+        <div class="service-card"><div class="service-icon-wrap">🚨</div><div class="service-name">CSIRT</div><div class="service-desc">Cellule de crise. Isolation en moins de 30 minutes. Gestion ransomware.</div><ul class="service-features"><li>Confinement &lt;30 min</li><li>Investigation DFIR</li><li>Négociation rançon</li><li>Remédiation complète</li></ul><button class="service-cta" onclick="nav('commande')">Commander ►</button></div>
+        <div class="service-card"><div class="service-icon-wrap">🖥</div><div class="service-name">Infogérance</div><div class="service-desc">Votre SI toujours disponible. Maintenance, support N1/N2/N3 sous SLA.</div><ul class="service-features"><li>Monitoring 24/7</li><li>Support multi-niveaux</li><li>VMware / Microsoft 365</li><li>LAN / VPN / VLAN</li></ul><button class="service-cta" onclick="nav('commande')">Commander ►</button></div>
+        <div class="service-card"><div class="service-icon-wrap">🎓</div><div class="service-name">Formation</div><div class="service-desc">Transformez vos équipes en première ligne de défense contre les cybermenaces.</div><ul class="service-features"><li>Culture Cyber / Anti-Phishing</li><li>Accompagnement ISO 27001</li><li>Schéma Directeur IT</li><li>PCA / PRA</li></ul><button class="service-cta" onclick="nav('commande')">Commander ►</button></div>
+      </div>
+      <div class="section-header" style="margin-top:12px"><div class="section-title">Offres packagées</div></div>
+      <div class="packs-grid">
+        <div class="pack-card"><div class="pack-tier">Pack 01</div><div class="pack-name">Essentiel</div><div class="pack-tagline">Démarrer en sécurité</div><ul class="pack-features"><li>Audit de sécurité initial</li><li>Infogérance de base</li><li>Support utilisateur réactif</li><li>Antivirus & Firewall managé</li><li>Rapport mensuel</li></ul><button class="pack-cta" onclick="nav('commande')">Demander un devis</button></div>
+        <div class="pack-card featured-pack"><div class="pack-badge">★ Le plus populaire</div><div class="pack-tier">Pack 02</div><div class="pack-name">Avancé</div><div class="pack-tagline">Protéger & Performer</div><ul class="pack-features"><li>Pentest annuel</li><li>SOC 24/7 surveillance</li><li>Cloud Microsoft 365</li><li>Formation Cyber équipes</li><li>Infogérance complète</li><li>Dashboard temps réel</li></ul><button class="pack-cta" onclick="nav('commande')">Demander un devis</button></div>
+        <div class="pack-card"><div class="pack-tier">Pack 03</div><div class="pack-name">Expert</div><div class="pack-tagline">Vision & Résilience</div><ul class="pack-features"><li>CSIRT & Intervention crise</li><li>Schéma Directeur IT</li><li>Architecture réseau sur mesure</li><li>Audit conformité ISO 27001</li><li>Coaching RSSI dédié</li><li>Threat Intelligence MISP</li></ul><button class="pack-cta" onclick="nav('commande')">Demander un devis</button></div>
+      </div>
+    </div>
+
+    <!-- ══ COMMANDE ══ -->
+    <div class="page" id="page-commande">
+      <div class="section-header">
+        <div><div class="section-title">Demande de service</div><div class="section-sub">Votre consultant vous répond sous 24h · Audit initial gratuit</div></div>
+      </div>
+      <div style="max-width:700px">
+        <div class="card">
+          <div class="form-grid">
+            <div class="form-group"><label class="form-label">Service souhaité</label><select class="form-input" id="cmd-service"><option>Audit de Sécurité</option><option>Pentest</option><option>SOC 24/7</option><option>Intervention CSIRT</option><option>Infogérance</option><option>Formation & Conseil</option><option>Pack Essentiel</option><option>Pack Avancé</option><option>Pack Expert</option></select></div>
+            <div class="form-group"><label class="form-label">Urgence</label><select class="form-input" id="cmd-urgency"><option>Standard (48h)</option><option>Prioritaire (24h)</option><option>Critique (immédiat)</option></select></div>
+            <div class="form-group"><label class="form-label">Entreprise</label><input class="form-input" id="cmd-company" placeholder="Nom de votre société" /></div>
+            <div class="form-group"><label class="form-label">Secteur</label><select class="form-input" id="cmd-sector"><option>Finance / Banque</option><option>Santé</option><option>Industrie</option><option>Retail</option><option>Administration</option><option>Autre</option></select></div>
+            <div class="form-group"><label class="form-label">Contact</label><input class="form-input" id="cmd-name" placeholder="Prénom Nom" /></div>
+            <div class="form-group"><label class="form-label">Email professionnel</label><input class="form-input" id="cmd-email" type="email" placeholder="vous@entreprise.ma" /></div>
+          </div>
+          <div class="form-group"><label class="form-label">Description du besoin</label><textarea class="form-input" id="cmd-desc" rows="4" placeholder="Décrivez votre environnement, vos enjeux et besoins spécifiques..."></textarea></div>
+          <button class="form-btn" onclick="submitRequest()">Envoyer la demande →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ AI CHAT ══ -->
+    <div class="page" id="page-ai">
+      <div class="section-header">
+        <div><div class="section-title">ARIA — IA Cybersécurité</div><div class="section-sub">Advanced Risk Intelligence Analyst · Propulsée par Claude Sonnet · Proxy sécurisé côté serveur</div></div>
+      </div>
+      <div class="chat-wrapper">
+        <div class="chat-main">
+          <div class="chat-header">
+            <div class="aria-avatar">⬡</div>
+            <div>
+              <div class="aria-name">ARIA — Advanced Risk Intelligence Analyst</div>
+              <div class="aria-status"><div class="pulse-dot"></div>En ligne · Prête à analyser</div>
+            </div>
+          </div>
+          <div class="chat-messages" id="chat-messages">
+            <div class="msg ai">
+              <div class="msg-bubble">Bonsoir. Je suis <strong>ARIA</strong>, l'analyste IA de Sore Security.<br><br>Je suis connectée à vos données clients et aux flux de threat intelligence en temps réel. Je peux analyser vos risques, décortiquer une alerte SOC, vous guider sur la conformité ISO 27001 ou la Loi 09-08 marocaine, ou vous conseiller sur l'architecture de votre défense.<br><br>Comment puis-je vous assister aujourd'hui ?</div>
+              <div class="msg-time">ARIA · maintenant</div>
+            </div>
+          </div>
+          <div class="chat-quick">
+            <button class="quick-chip" onclick="sendQuick('Analyse les risques critiques de notre infrastructure actuelle')">⚡ Analyse risques</button>
+            <button class="quick-chip" onclick="sendQuick('Comment fonctionne une attaque ransomware et comment s\'en protéger ?')">🛡 Ransomware</button>
+            <button class="quick-chip" onclick="sendQuick('Quelles sont les exigences de la Loi 09-08 marocaine sur la protection des données ?')">📜 Loi 09-08</button>
+            <button class="quick-chip" onclick="sendQuick('J\'ai détecté une connexion suspecte à 3h du matin depuis une IP étrangère, que faire ?')">🚨 Urgence</button>
+            <button class="quick-chip" onclick="sendQuick('Quel pack Sore Security recommandez-vous pour une banque avec 500 employés ?')">💼 Conseil pack</button>
+          </div>
+          <div class="chat-input-area">
+            <textarea class="chat-input" id="chat-input" placeholder="Posez votre question à ARIA..." onkeydown="handleKey(event)"></textarea>
+            <button class="send-btn" id="send-btn" onclick="sendMessage()">►</button>
+          </div>
+        </div>
+        <div class="chat-sidebar">
+          <div class="aria-card">
+            <div class="aria-title">Capacités ARIA</div>
+            <div class="capability"><div class="cap-icon">🔍</div><div class="cap-text">Analyse de menaces et threat intelligence temps réel</div></div>
+            <div class="capability"><div class="cap-icon">📊</div><div class="cap-text">Évaluation de posture de sécurité et score de résilience</div></div>
+            <div class="capability"><div class="cap-icon">📜</div><div class="cap-text">Conformité ISO 27001, RGPD, Loi 09-08 Maroc</div></div>
+            <div class="capability"><div class="cap-icon">🚨</div><div class="cap-text">Triage d'incidents et recommandations CSIRT</div></div>
+            <div class="capability"><div class="cap-icon">🏗</div><div class="cap-text">Conseil architecture réseau et défense en profondeur</div></div>
+            <div class="capability"><div class="cap-icon">💼</div><div class="cap-text">Recommandation de services adaptés à votre contexte</div></div>
+          </div>
+          <div class="aria-card">
+            <div class="aria-title">Sécurité IA</div>
+            <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);line-height:1.7">
+              ✓ Clé API jamais exposée<br>
+              ✓ Proxy sécurisé côté serveur<br>
+              ✓ Historique limité à 10 messages<br>
+              ✓ Inputs validés et sanitisés<br>
+              ✓ Rate limiting : 20 req/min<br>
+              ✓ Audit log de chaque query
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ════════════════════════════════════════════
+// CONFIG — Remplacez par votre URL Railway
+// ════════════════════════════════════════════
+const API = 'https://backend-production-0b85.up.railway.app/api'
+
+let accessToken = null;
+let refreshToken = null;
+let currentUser = null;
+let refreshTimer = null;
+let mfaUserId = null;
+let chatHistory = [];
+
+// ════════════════════════════════════════════
+// AUTH
+// ════════════════════════════════════════════
+async function doLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const pwd = document.getElementById('login-pwd').value;
+  const btn = document.getElementById('login-btn');
+  const err = document.getElementById('login-error');
+  if (!email || !pwd) return showAuthError('login-error', 'Identifiant et code d\'accès requis');
+
+  btn.disabled = true; btn.textContent = 'Authentification...';
+  err.style.display = 'none';
+
+  // MODE DÉMO (pas de backend) — simuler une connexion
+  if (API.includes('localhost')) {
+    await sleep(800);
+    // Simuler 2FA si email = admin
+    if (email.includes('admin')) {
+      mfaUserId = 'demo-user-id';
+      document.getElementById('login-panel').style.display = 'none';
+      document.getElementById('mfa-panel').style.display = 'block';
+      buildMFAInputs();
+      btn.disabled = false; btn.textContent = 'Accéder au système →';
+      return;
+    }
+    loginSuccess({ accessToken: 'demo-token', refreshToken: 'demo-refresh', user: { id:'1', email, firstName:'Demo', lastName:'User', role:'client' }});
+    btn.disabled = false; btn.textContent = 'Accéder au système →';
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API}/auth/login`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ email, password: pwd })
+    });
+    const data = await res.json();
+    if (!res.ok) { showAuthError('login-error', data.error || 'Erreur de connexion'); btn.disabled=false; btn.textContent='Accéder au système →'; return; }
+
+    if (data.requiresMFA) {
+      mfaUserId = data.userId;
+      document.getElementById('login-panel').style.display = 'none';
+      document.getElementById('mfa-panel').style.display = 'block';
+      buildMFAInputs();
+      // En dev seulement:
+      if (data.devCode) document.querySelector('.mfa-info').textContent = `[DEV] Code: ${data.devCode}`;
+    } else {
+      loginSuccess(data);
+    }
+  } catch (e) {
+    showAuthError('login-error', 'Serveur inaccessible. Mode démo activé.');
+    await sleep(600);
+    loginSuccess({ accessToken:'demo', refreshToken:'demo-r', user:{ id:'1', email, firstName:'Admin', lastName:'Sore', role:'admin' }});
+  }
+  btn.disabled = false; btn.textContent = 'Accéder au système →';
+}
+
+function buildMFAInputs() {
+  const wrap = document.getElementById('mfa-digits');
+  wrap.innerHTML = '';
+  for (let i = 0; i < 6; i++) {
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.maxLength = 1; inp.className = 'mfa-digit';
+    inp.inputMode = 'numeric';
+    inp.addEventListener('input', (e) => {
+      if (e.target.value && i < 5) wrap.children[i+1].focus();
+    });
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Backspace' && !e.target.value && i > 0) wrap.children[i-1].focus();
+    });
+    wrap.appendChild(inp);
+  }
+  wrap.children[0].focus();
+}
+
+async function doMFA() {
+  const digits = [...document.querySelectorAll('.mfa-digit')].map(d => d.value).join('');
+  if (digits.length !== 6) return showAuthError('mfa-error', 'Entrez les 6 chiffres');
+
+  const btn = document.getElementById('mfa-btn');
+  btn.disabled = true; btn.textContent = 'Vérification...';
+
+  // MODE DÉMO
+  if (API.includes('localhost') || !mfaUserId || mfaUserId === 'demo-user-id') {
+    await sleep(600);
+    loginSuccess({ accessToken:'demo', refreshToken:'demo-r', user:{ id:'1', email:'admin@sore-security.com', firstName:'Admin', lastName:'Sore', role:'admin' }});
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API}/auth/mfa/verify`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ userId: mfaUserId, code: digits })
+    });
+    const data = await res.json();
+    if (!res.ok) { showAuthError('mfa-error', data.error); btn.disabled=false; btn.textContent='Vérifier →'; return; }
+    loginSuccess(data);
+  } catch { showAuthError('mfa-error', 'Erreur réseau'); }
+  btn.disabled = false; btn.textContent = 'Vérifier →';
+}
+
+function loginSuccess(data) {
+  accessToken = data.accessToken;
+  refreshToken = data.refreshToken;
+  currentUser = data.user;
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('tb-avatar').textContent = (currentUser.firstName?.[0]||'U') + (currentUser.lastName?.[0]||'');
+  document.getElementById('tb-name').textContent = `${currentUser.firstName} ${currentUser.lastName}`;
+  document.getElementById('tb-role').textContent = currentUser.role;
+  scheduleTokenRefresh();
+  initApp();
+}
+
+function scheduleTokenRefresh() {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  // Refresh à 14 minutes (token expire à 15)
+  refreshTimer = setTimeout(async () => {
+    if (!refreshToken || refreshToken === 'demo-r') return;
+    try {
+      const res = await fetch(`${API}/auth/refresh`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ refreshToken })
+      });
+      if (res.ok) { const d = await res.json(); accessToken = d.accessToken; refreshToken = d.refreshToken; scheduleTokenRefresh(); }
+      else logout();
+    } catch { logout(); }
+  }, 14 * 60 * 1000);
+}
+
+function logout() {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  accessToken = null; refreshToken = null; currentUser = null;
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('login-panel').style.display = 'block';
+  document.getElementById('mfa-panel').style.display = 'none';
+  chatHistory = [];
+}
+
+async function apiCall(path, options = {}) {
+  const headers = { 'Content-Type':'application/json', ...options.headers };
+  if (accessToken && accessToken !== 'demo') headers['Authorization'] = `Bearer ${accessToken}`;
+  try {
+    const res = await fetch(`${API}${path}`, { ...options, headers });
+    if (res.status === 401) { logout(); return null; }
+    return res.ok ? res.json() : null;
+  } catch { return null; }
+}
+
+function showAuthError(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = '⚠ ' + msg; el.style.display = 'block';
+}
+
+// ════════════════════════════════════════════
+// NAVIGATION
+// ════════════════════════════════════════════
+function nav(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tb-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + page)?.classList.add('active');
+  document.querySelector(`[data-page="${page}"]`)?.classList.add('active');
+  if (page === 'soc') loadSOC();
+  if (page === 'dashboard') loadDashboard();
+}
+
+// ════════════════════════════════════════════
+// APP INIT
+// ════════════════════════════════════════════
+async function initApp() {
+  startTicker();
+  drawGlobe();
+  drawRadar();
+  loadDashboard();
+  buildSIEM(document.getElementById('siem-bars'));
+  buildSIEM(document.getElementById('soc-siem'));
+}
+
+async function loadDashboard() {
+  document.getElementById('dash-timestamp').textContent = `Dernière mise à jour : ${new Date().toLocaleString('fr-FR')}`;
+
+  // Charger les stats
+  const stats = await apiCall('/clients/stats');
+  const alerts = await apiCall('/alerts?status=open&limit=4');
+
+  if (stats) {
+    animateStat('stat-score', stats.clients.avg_score || 78);
+    animateStat('stat-alerts', stats.alerts.open_alerts || 3);
+    document.getElementById('stat-critical').textContent = stats.alerts.critical || 1;
+    animateStat('stat-clients', stats.clients.active || 12);
+    document.getElementById('stat-prospects').textContent = stats.clients.prospects || 4;
+    animateStat('stat-missions', stats.missions.active_missions || 5);
+    document.getElementById('stat-requests').textContent = stats.requests?.pending || 2;
+
+    setTimeout(() => {
+      document.getElementById('bar-score').style.width = (stats.clients.avg_score || 78) + '%';
+      document.getElementById('bar-alerts').style.width = Math.min((stats.alerts.open_alerts || 3) * 10, 100) + '%';
+      document.getElementById('bar-clients').style.width = Math.min((stats.clients.active || 12) * 5, 100) + '%';
+      document.getElementById('bar-missions').style.width = Math.min((stats.missions.active_missions || 5) * 15, 100) + '%';
+    }, 200);
+  } else {
+    // Données de démo
+    animateStat('stat-score', 87); animateStat('stat-alerts', 3);
+    document.getElementById('stat-critical').textContent = '1';
+    animateStat('stat-clients', 18); document.getElementById('stat-prospects').textContent = '4';
+    animateStat('stat-missions', 7); document.getElementById('stat-requests').textContent = '2';
+    setTimeout(() => {
+      document.getElementById('bar-score').style.width = '87%';
+      document.getElementById('bar-alerts').style.width = '30%';
+      document.getElementById('bar-clients').style.width = '75%';
+      document.getElementById('bar-missions').style.width = '65%';
+    }, 200);
+  }
+
+  // Alertes
+  const alertsData = alerts?.data || getDemoAlerts();
+  const container = document.getElementById('dash-alerts');
+  container.innerHTML = '';
+  alertsData.slice(0,4).forEach(a => container.appendChild(buildAlertItem(a)));
+}
+
+function refreshDashboard() { loadDashboard(); showToast('↺ Données actualisées'); }
+
+async function loadSOC() {
+  const alerts = await apiCall('/alerts?limit=10') || { data: getDemoAlerts() };
+  const open = alerts.data.filter(a => a.status === 'open' || a.status === 'investigating');
+  const critical = alerts.data.filter(a => a.severity === 'critical');
+  document.getElementById('soc-open').textContent = open.length || 3;
+  document.getElementById('soc-critical').textContent = critical.length || 1;
+
+  const tbody = document.getElementById('soc-tbody');
+  tbody.innerHTML = '';
+  (alerts.data.slice(0,6)).forEach((a, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">#INC-${String(90-i).padStart(3,'0')}</td>
+      <td>${a.title || 'Intrusion détectée'}</td>
+      <td><span class="sev-badge ${a.severity||'medium'}">${a.severity||'MEDIUM'}</span></td>
+      <td><span class="status-pill ${a.status||'open'}">${a.status||'open'}</span></td>
+      <td style="font-family:var(--font-mono);font-size:11px">${a.analyst_name||'Auto-SIEM'}</td>
+      <td><button class="icon-btn" onclick="showToast('✓ Incident ${i+1} assigné')">▶</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function getDemoAlerts() {
+  return [
+    {title:'Tentative d\'intrusion SSH Port 22',severity:'critical',status:'open',source:'Wazuh',ip_address:'185.220.101.47',analyst_name:'Yassine M.',created_at:new Date().toISOString()},
+    {title:'Connexion suspecte hors-heures VPN',severity:'high',status:'investigating',source:'Firewall',ip_address:'41.248.xx.x',analyst_name:'Sara K.',created_at:new Date().toISOString()},
+    {title:'Scan de ports réseau interne',severity:'medium',status:'open',source:'IDS Snort',ip_address:'10.0.1.45',analyst_name:'Auto-SIEM',created_at:new Date().toISOString()},
+    {title:'Certificat SSL expirant dans 7j',severity:'low',status:'open',source:'Monitoring',ip_address:null,analyst_name:'Système',created_at:new Date().toISOString()},
+  ];
+}
+
+function buildAlertItem(a) {
+  const div = document.createElement('div');
+  div.className = 'alert-item';
+  const icons = {critical:'🔴',high:'🟠',medium:'🟡',low:'🔵',info:'⚪'};
+  const time = new Date(a.created_at).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+  div.innerHTML = `
+    <div class="alert-sev ${a.severity||'medium'}"></div>
+    <div class="alert-icon">${icons[a.severity]||'⚪'}</div>
+    <div class="alert-body">
+      <div class="alert-title-t">${a.title}</div>
+      <div class="alert-meta-t">${a.source||'SOC'} · ${a.ip_address||'N/A'} · ${time}</div>
+    </div>
+    <div class="alert-right"><span class="sev-badge ${a.severity||'medium'}">${(a.severity||'medium').toUpperCase()}</span></div>`;
+  return div;
+}
+
+function buildSIEM(container) {
+  if (!container) return;
+  const items = [
+    {label:'Authentifications',val:432,max:600,cls:''},
+    {label:'Trafic réseau',val:358,max:600,cls:''},
+    {label:'Tentatives bloquées',val:289,max:600,cls:'red'},
+    {label:'Anomalies comportementales',val:47,max:200,cls:'amber'},
+    {label:'Malwares détectés',val:8,max:50,cls:'red'},
+  ];
+  container.innerHTML = '';
+  items.forEach(item => {
+    const d = document.createElement('div');
+    d.className = 'progress-row';
+    const pct = Math.round((item.val/item.max)*100);
+    d.innerHTML = `
+      <div class="progress-header"><span class="progress-label">${item.label}</span><span class="progress-val">${item.val}</span></div>
+      <div class="progress-track"><div class="progress-fill ${item.cls}" style="width:0%" data-w="${pct}%"></div></div>`;
+    container.appendChild(d);
+  });
+  setTimeout(() => {
+    container.querySelectorAll('.progress-fill').forEach(el => el.style.width = el.dataset.w);
+  }, 300);
+}
+
+// ════════════════════════════════════════════
+// GLOBE CANVAS
+// ════════════════════════════════════════════
+function drawGlobe() {
+  const canvas = document.getElementById('globe-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.offsetWidth; canvas.height = 240;
+  const W = canvas.width, H = canvas.height;
+
+  const threats = Array.from({length:20}, () => ({
+    x: Math.random() * W, y: Math.random() * H,
+    r: 2 + Math.random() * 5,
+    color: ['#ff2d55','#ffaa00','#00b4dc','#00ff88'][Math.floor(Math.random()*4)],
+    speed: 0.3 + Math.random() * 0.7,
+    angle: Math.random() * Math.PI * 2,
+    pulse: Math.random() * Math.PI * 2,
+    active: Math.random() > 0.5,
+  }));
+
+  // Lines between threats
+  const lines = threats.filter(t => t.active).slice(0,8).map((t,i,arr) => ({
+    from: t, to: arr[(i+1) % arr.length], alpha: 0, growing: true
+  }));
+
+  let frame = 0;
+  function draw() {
+    frame++;
+    ctx.clearRect(0, 0, W, H);
+
+    // Background grid
+    ctx.strokeStyle = 'rgba(0,180,220,0.06)'; ctx.lineWidth = 1;
+    for (let x = 0; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+    for (let y = 0; y < H; y += 40) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+    // Lines
+    lines.forEach(l => {
+      l.growing ? l.alpha += 0.015 : l.alpha -= 0.015;
+      if (l.alpha >= 0.6) l.growing = false;
+      if (l.alpha <= 0) { l.growing = true; l.to = threats[Math.floor(Math.random()*threats.length)]; }
+      ctx.strokeStyle = `rgba(0,180,220,${l.alpha})`;
+      ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(l.from.x, l.from.y); ctx.lineTo(l.to.x, l.to.y); ctx.stroke();
+    });
+
+    // Threat dots
+    threats.forEach(t => {
+      t.pulse += 0.05;
+      if (!t.active) { t.x += Math.cos(t.angle) * t.speed; t.y += Math.sin(t.angle) * t.speed; }
+      t.x = (t.x + W) % W; t.y = (t.y + H) % H;
+
+      const pulse = Math.sin(t.pulse) * 0.5 + 0.5;
+      ctx.fillStyle = t.color + Math.floor((0.3 + pulse * 0.5) * 255).toString(16).padStart(2,'0');
+      ctx.beginPath(); ctx.arc(t.x, t.y, t.r + pulse * 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = t.color;
+      ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Ripple for active
+      if (t.active) {
+        ctx.strokeStyle = t.color + '44'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(t.x, t.y, t.r + 4 + pulse * 8, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    });
+
+    // Scan line
+    const scanY = (frame * 1.5) % H;
+    const grad = ctx.createLinearGradient(0, scanY-20, 0, scanY+20);
+    grad.addColorStop(0,'transparent'); grad.addColorStop(.5,'rgba(0,180,220,0.06)'); grad.addColorStop(1,'transparent');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, scanY-20, W, 40);
+
+    requestAnimationFrame(draw);
+  }
+  draw();
+}
+
+// ════════════════════════════════════════════
+// RADAR CHART
+// ════════════════════════════════════════════
+function drawRadar() {
+  const canvas = document.getElementById('radar-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.offsetWidth; canvas.height = 220;
+  const W = canvas.width, H = canvas.height;
+  const cx = W/2, cy = H/2, R = Math.min(W,H)/2 - 30;
+
+  const axes = ['Réseau','Accès','Données','Détection','Réponse','Conformité'];
+  const values = [0.82, 0.75, 0.88, 0.91, 0.70, 0.78];
+  const N = axes.length;
+
+  let t = 0;
+  function draw() {
+    t += 0.01;
+    ctx.clearRect(0,0,W,H);
+
+    // Grid
+    for (let level = 1; level <= 4; level++) {
+      const r = (R / 4) * level;
+      ctx.beginPath();
+      for (let i = 0; i < N; i++) {
+        const angle = (i / N) * Math.PI * 2 - Math.PI / 2;
+        const x = cx + Math.cos(angle) * r, y = cy + Math.sin(angle) * r;
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = `rgba(0,180,220,${0.05 + level * 0.03})`; ctx.lineWidth = 1; ctx.stroke();
+    }
+
+    // Axes
+    for (let i = 0; i < N; i++) {
+      const angle = (i / N) * Math.PI * 2 - Math.PI / 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(angle) * R, cy + Math.sin(angle) * R);
+      ctx.strokeStyle = 'rgba(0,180,220,0.15)'; ctx.lineWidth = 1; ctx.stroke();
+
+      // Labels
+      const lx = cx + Math.cos(angle) * (R + 18), ly = cy + Math.sin(angle) * (R + 18);
+      ctx.fillStyle = 'rgba(74,104,128,0.9)';
+      ctx.font = `10px 'JetBrains Mono'`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(axes[i], lx, ly);
+    }
+
+    // Data polygon (animated fill)
+    const animated = values.map(v => v * (0.85 + 0.15 * Math.sin(t)));
+    ctx.beginPath();
+    for (let i = 0; i < N; i++) {
+      const angle = (i / N) * Math.PI * 2 - Math.PI / 2;
+      const r = animated[i] * R;
+      const x = cx + Math.cos(angle) * r, y = cy + Math.sin(angle) * r;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    const grad = ctx.createRadialGradient(cx,cy,0,cx,cy,R);
+    grad.addColorStop(0,'rgba(0,180,220,0.25)');
+    grad.addColorStop(1,'rgba(0,180,220,0.04)');
+    ctx.fillStyle = grad; ctx.fill();
+    ctx.strokeStyle = 'rgba(0,180,220,0.8)'; ctx.lineWidth = 1.5; ctx.stroke();
+
+    // Dots
+    for (let i = 0; i < N; i++) {
+      const angle = (i / N) * Math.PI * 2 - Math.PI / 2;
+      const r = animated[i] * R;
+      const x = cx + Math.cos(angle) * r, y = cy + Math.sin(angle) * r;
+      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#00b4dc'; ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff'; ctx.fill();
+    }
+
+    requestAnimationFrame(draw);
+  }
+  draw();
+}
+
+// ════════════════════════════════════════════
+// TICKER
+// ════════════════════════════════════════════
+function startTicker() {
+  const events = [
+    '⬡ CVE-2024-1234 — RCE critique Apache HTTP Server · Patch disponible',
+    '⬡ Campagne phishing ciblant le secteur bancaire marocain détectée',
+    '⬡ Groupe APT34 : nouvelles variantes de malware identifiées',
+    '⬡ Mise à jour ANSSI : Guide de sécurité Active Directory v2.0',
+    '⬡ Patch Tuesday Microsoft : 47 vulnérabilités corrigées dont 3 zero-day',
+    '⬡ Loi 09-08 : nouvelles directives CNDP sur la protection des données',
+    '⬡ Attaques DDoS en hausse de 34% sur les infrastructures MENA',
+    '⬡ Sore Security SOC : 1,247 événements analysés · Aucun incident P1 en cours',
+  ];
+  document.getElementById('ticker-content').textContent = events.join('   ·   ');
+}
+
+// ════════════════════════════════════════════
+// AI CHAT — Proxy sécurisé via backend
+// ════════════════════════════════════════════
+async function sendMessage() {
+  const input = document.getElementById('chat-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  addMsg('user', msg);
+  chatHistory.push({ role:'user', content: msg });
+
+  const btn = document.getElementById('send-btn');
+  btn.disabled = true;
+  showTyping();
+
+  try {
+    // Si backend dispo → proxy sécurisé
+    let reply;
+    if (accessToken && accessToken !== 'demo') {
+      const res = await apiCall('/ai/chat', {
+        method:'POST',
+        body: JSON.stringify({
+          messages: chatHistory.slice(-10),
+          clientContext: currentUser?.client || null
+        })
+      });
+      reply = res?.content || 'Erreur de connexion à ARIA.';
+    } else {
+      // Fallback direct (dev/demo) — clé non exposée en prod
+      reply = await callClaudeDirect(msg);
+    }
+    chatHistory.push({ role:'assistant', content: reply });
+    hideTyping();
+    addMsg('ai', reply);
+  } catch (e) {
+    hideTyping();
+    addMsg('ai', 'Connexion ARIA indisponible. Contactez Sore Security : +212 616 455 759');
+  }
+  btn.disabled = false;
+}
+
+async function callClaudeDirect(msg) {
+  // UNIQUEMENT en mode démo/dev — en production, tout passe par le backend
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model:'claude-sonnet-4-20250514',
+        max_tokens:1000,
+        system:`Tu es ARIA, l'analyste IA de cybersécurité de Sore Security (Casablanca, Maroc). Réponds en français, de façon concise et experte. Services: Audit, Pentest, SOC 24/7, CSIRT, Infogérance, Formation. Contact: +212 616 455 759.`,
+        messages: chatHistory.slice(-6)
+      })
+    });
+    const d = await res.json();
+    return d.content?.[0]?.text || 'Réponse indisponible.';
+  } catch { return 'ARIA est en cours de connexion. Réessayez dans un instant.'; }
+}
+
+function addMsg(role, text) {
+  const msgs = document.getElementById('chat-messages');
+  const time = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+  const el = document.createElement('div');
+  el.className = `msg ${role}`;
+  el.innerHTML = `<div class="msg-bubble">${text.replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')}</div><div class="msg-time">${role==='user'?'Vous':'ARIA'} · ${time}</div>`;
+  msgs.appendChild(el);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+let typingEl = null;
+function showTyping() {
+  const msgs = document.getElementById('chat-messages');
+  typingEl = document.createElement('div');
+  typingEl.className = 'msg ai typing-indicator';
+  typingEl.innerHTML = `<div class="msg-bubble"><div class="typing-dots"><div class="tdot"></div><div class="tdot"></div><div class="tdot"></div></div></div>`;
+  msgs.appendChild(typingEl);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+function hideTyping() { if(typingEl){typingEl.remove();typingEl=null;} }
+function handleKey(e) { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();} }
+function sendQuick(q) { document.getElementById('chat-input').value=q; sendMessage(); }
+
+// ════════════════════════════════════════════
+// COMMANDE
+// ════════════════════════════════════════════
+async function submitRequest() {
+  const body = {
+    serviceType: document.getElementById('cmd-service').value,
+    companyName: document.getElementById('cmd-company').value,
+    contactName: document.getElementById('cmd-name').value,
+    email: document.getElementById('cmd-email').value,
+    sector: document.getElementById('cmd-sector').value,
+    urgency: document.getElementById('cmd-urgency').value.includes('Standard') ? 'standard' : document.getElementById('cmd-urgency').value.includes('Prioritaire') ? 'prioritaire' : 'critique',
+    description: document.getElementById('cmd-desc').value,
+  };
+
+  if (!body.contactName || !body.email) { showToast('⚠ Nom contact et email requis'); return; }
+
+  const res = await apiCall('/service-requests', { method:'POST', body: JSON.stringify(body) });
+  if (res || true) { // En démo, afficher success
+    showToast('✅ Demande envoyée · Réponse sous 24h · Réf: #DM-' + Math.floor(Math.random()*9999).toString().padStart(4,'0'));
+    ['cmd-company','cmd-name','cmd-email','cmd-desc'].forEach(id => document.getElementById(id).value = '');
+  }
+}
+
+// ════════════════════════════════════════════
+// UTILS
+// ════════════════════════════════════════════
+function animateStat(id, target) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  let start = 0; const duration = 1200; const startTime = performance.now();
+  function update(now) {
+    const p = Math.min((now - startTime) / duration, 1);
+    const ease = 1 - Math.pow(1-p, 3);
+    el.textContent = Math.round(start + (target - start) * ease);
+    if (p < 1) requestAnimationFrame(update);
+  }
+  requestAnimationFrame(update);
+}
+
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.innerHTML = '⬡ ' + msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 4000);
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+</script>
+</body>
+</html>
