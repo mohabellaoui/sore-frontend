@@ -981,23 +981,6 @@ async function doLogin() {
   btn.disabled = true; btn.textContent = 'Authentification...';
   err.style.display = 'none';
 
-  // MODE DÉMO (pas de backend) — simuler une connexion
-  if (API.includes('localhost')) {
-    await sleep(800);
-    // Simuler 2FA si email = admin
-    if (email.includes('admin')) {
-      mfaUserId = 'demo-user-id';
-      document.getElementById('login-panel').style.display = 'none';
-      document.getElementById('mfa-panel').style.display = 'block';
-      buildMFAInputs();
-      btn.disabled = false; btn.textContent = 'Accéder au système →';
-      return;
-    }
-    loginSuccess({ accessToken: 'demo-token', refreshToken: 'demo-refresh', user: { id:'1', email, firstName:'Demo', lastName:'User', role:'client' }});
-    btn.disabled = false; btn.textContent = 'Accéder au système →';
-    return;
-  }
-
   try {
     const res = await fetch(`${API}/auth/login`, {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -1011,15 +994,11 @@ async function doLogin() {
       document.getElementById('login-panel').style.display = 'none';
       document.getElementById('mfa-panel').style.display = 'block';
       buildMFAInputs();
-      // En dev seulement:
-      if (data.devCode) document.querySelector('.mfa-info').textContent = `[DEV] Code: ${data.devCode}`;
     } else {
       loginSuccess(data);
     }
   } catch (e) {
-    showAuthError('login-error', 'Serveur inaccessible. Mode démo activé.');
-    await sleep(600);
-    loginSuccess({ accessToken:'demo', refreshToken:'demo-r', user:{ id:'1', email, firstName:'Admin', lastName:'Sore', role:'admin' }});
+    showAuthError('login-error', 'Serveur inaccessible. Veuillez réessayer.');
   }
   btn.disabled = false; btn.textContent = 'Accéder au système →';
 }
@@ -1048,13 +1027,6 @@ async function doMFA() {
 
   const btn = document.getElementById('mfa-btn');
   btn.disabled = true; btn.textContent = 'Vérification...';
-
-  // MODE DÉMO
-  if (API.includes('localhost') || !mfaUserId || mfaUserId === 'demo-user-id') {
-    await sleep(600);
-    loginSuccess({ accessToken:'demo', refreshToken:'demo-r', user:{ id:'1', email:'admin@sore-security.com', firstName:'Admin', lastName:'Sore', role:'admin' }});
-    return;
-  }
 
   try {
     const res = await fetch(`${API}/auth/mfa/verify`, {
@@ -1085,7 +1057,7 @@ function scheduleTokenRefresh() {
   if (refreshTimer) clearTimeout(refreshTimer);
   // Refresh à 14 minutes (token expire à 15)
   refreshTimer = setTimeout(async () => {
-    if (!refreshToken || refreshToken === 'demo-r') return;
+    if (!refreshToken) return;
     try {
       const res = await fetch(`${API}/auth/refresh`, {
         method:'POST', headers:{'Content-Type':'application/json'},
@@ -1109,7 +1081,7 @@ function logout() {
 
 async function apiCall(path, options = {}) {
   const headers = { 'Content-Type':'application/json', ...options.headers };
-  if (accessToken && accessToken !== 'demo') headers['Authorization'] = `Bearer ${accessToken}`;
+  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
   try {
     const res = await fetch(`${API}${path}`, { ...options, headers });
     if (res.status === 401) { logout(); return null; }
@@ -1458,19 +1430,14 @@ async function sendMessage() {
   try {
     // Si backend dispo → proxy sécurisé
     let reply;
-    if (accessToken && accessToken !== 'demo') {
-      const res = await apiCall('/ai/chat', {
-        method:'POST',
-        body: JSON.stringify({
-          messages: chatHistory.slice(-10),
-          clientContext: currentUser?.client || null
-        })
-      });
-      reply = res?.content || 'Erreur de connexion à ARIA.';
-    } else {
-      // Fallback direct (dev/demo) — clé non exposée en prod
-      reply = await callClaudeDirect(msg);
-    }
+    const res = await apiCall('/ai/chat', {
+      method:'POST',
+      body: JSON.stringify({
+        messages: chatHistory.slice(-10),
+        clientContext: currentUser?.client || null
+      })
+    });
+    reply = res?.content || 'Erreur de connexion à ARIA.';
     chatHistory.push({ role:'assistant', content: reply });
     hideTyping();
     addMsg('ai', reply);
@@ -1481,23 +1448,7 @@ async function sendMessage() {
   btn.disabled = false;
 }
 
-async function callClaudeDirect(msg) {
-  // UNIQUEMENT en mode démo/dev — en production, tout passe par le backend
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        model:'claude-sonnet-4-20250514',
-        max_tokens:1000,
-        system:`Tu es ARIA, l'analyste IA de cybersécurité de Sore Security (Casablanca, Maroc). Réponds en français, de façon concise et experte. Services: Audit, Pentest, SOC 24/7, CSIRT, Infogérance, Formation. Contact: +212 616 455 759.`,
-        messages: chatHistory.slice(-6)
-      })
-    });
-    const d = await res.json();
-    return d.content?.[0]?.text || 'Réponse indisponible.';
-  } catch { return 'ARIA est en cours de connexion. Réessayez dans un instant.'; }
-}
+
 
 function addMsg(role, text) {
   const msgs = document.getElementById('chat-messages');
