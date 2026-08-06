@@ -1184,11 +1184,115 @@ async function loadSOC() {
         <button class="icon-btn" onclick="showToast('✓ Incident assigné')">▶</button>
         <button class="icon-btn" style="color:var(--cyan);border-color:var(--cyan)" 
           onclick="generateScribeReport('${a.id}')" title="Générer rapport SCRIBE">📋</button>
+        <button class="icon-btn" style="color:var(--green);border-color:var(--green)" 
+          onclick="sentinelTriage('${a.id}')" title="Triage SENTINEL">🔍</button>
       </td>`;
     tbody.appendChild(tr);
   });
 }
 
+
+
+// ════════════════════════════════════════════
+// SENTINEL — Triage automatique des alertes
+// ════════════════════════════════════════════
+async function sentinelTriage(alertId) {
+  if (!alertId || alertId === 'undefined') {
+    showToast('⚠ Disponible uniquement sur les alertes réelles');
+    return;
+  }
+  showToast('⏳ SENTINEL analyse l\'alerte...');
+  try {
+    const res = await apiCall('/agents/sentinel/triage', {
+      method: 'POST',
+      body: JSON.stringify({ alertId })
+    });
+    if (!res?.triage) { showToast('❌ Erreur triage'); return; }
+    displaySentinelTriage(res.triage);
+  } catch (e) {
+    showToast('❌ Erreur SENTINEL: ' + e.message);
+  }
+}
+
+function displaySentinelTriage(triage) {
+  const modal = document.createElement('div');
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+
+  const riskColor = triage.riskScore >= 80 ? 'var(--red)' : triage.riskScore >= 50 ? 'var(--amber)' : 'var(--green)';
+  const fpBadge = triage.isFalsePositive 
+    ? '<span style="background:var(--green-dim);color:var(--green);padding:3px 10px;border-radius:4px;font-size:11px">FAUX POSITIF</span>'
+    : '<span style="background:var(--red-dim);color:var(--red);padding:3px 10px;border-radius:4px;font-size:11px">ALERTE CONFIRMÉE</span>';
+
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:700px;width:100%;max-height:90vh;overflow-y:auto;padding:32px;position:relative">
+      
+      <button onclick="this.closest('[style*=fixed]').remove()" 
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px">
+        <div style="font-size:11px;letter-spacing:3px;color:var(--green)">SENTINEL TRIAGE</div>
+        ${fpBadge}
+        <div style="margin-left:auto;font-size:28px;font-weight:700;color:${riskColor}">${triage.riskScore}<span style="font-size:14px;color:var(--text-dim)">/100</span></div>
+      </div>
+
+      <p style="color:var(--text-bright);font-size:15px;margin-bottom:24px">${triage.summary}</p>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+        <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px">
+          <div style="font-size:11px;color:var(--green);letter-spacing:2px;margin-bottom:12px">CLASSIFICATION</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Sévérité : <span style="color:var(--text);font-weight:600">${triage.confirmedSeverity?.toUpperCase()}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Priorité : <span style="color:var(--text)">P${triage.priority}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Tactique : <span style="color:var(--text)">${triage.mitreTactic}</span></div>
+          <div style="font-size:12px;color:var(--text-dim)">Technique : <span style="color:var(--cyan);font-family:monospace">${triage.mitreTechnique}</span></div>
+        </div>
+        <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px">
+          <div style="font-size:11px;color:var(--green);letter-spacing:2px;margin-bottom:12px">RÉPONSE AUTOMATIQUE</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Possible : <span style="color:${triage.autoResponse?.possible?'var(--green)':'var(--red)'}">${triage.autoResponse?.possible ? '✓ Oui' : '✗ Non'}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Action : <span style="color:var(--text)">${triage.autoResponse?.action || 'Intervention humaine requise'}</span></div>
+          <div style="font-size:12px;color:var(--text-dim)">Escalade : <span style="color:var(--amber)">${triage.escalateTo}</span></div>
+        </div>
+      </div>
+
+      <div style="background:var(--elevated);border:1px solid var(--amber);border-radius:6px;padding:16px;margin-bottom:20px">
+        <div style="font-size:11px;color:var(--amber);letter-spacing:2px;margin-bottom:8px">ACTION IMMÉDIATE</div>
+        <p style="color:var(--text-bright);font-size:14px;font-weight:600">${triage.immediateAction}</p>
+      </div>
+
+      <div style="margin-bottom:20px">
+        <div style="font-size:11px;color:var(--green);letter-spacing:2px;margin-bottom:10px">TAGS</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          ${(triage.tags || []).map(tag => `
+            <span style="background:var(--elevated);border:1px solid var(--line);
+                         color:var(--text-dim);padding:4px 10px;border-radius:4px;font-size:11px;
+                         font-family:monospace">${tag}</span>
+          `).join('')}
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;
+                  border-top:1px solid var(--line);padding-top:16px">
+        <div style="font-size:11px;color:var(--text-dim)">
+          SENTINEL v${triage.metadata?.agentVersion?.split('-')[1] || '1.0'} · ${triage.metadata?.engine}
+        </div>
+        <button onclick="this.closest('[style*=fixed]').remove()"
+          style="background:var(--green-dim);color:var(--green);border:1px solid var(--green);
+                 padding:8px 20px;border-radius:4px;cursor:pointer;font-size:13px">
+          Fermer
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  showToast('✅ Triage SENTINEL terminé');
+}
 
 // ════════════════════════════════════════════
 // SCRIBE — Génération de rapports IA
