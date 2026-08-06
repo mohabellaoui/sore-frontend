@@ -1180,9 +1180,123 @@ async function loadSOC() {
       <td><span class="sev-badge ${a.severity||'medium'}">${a.severity||'MEDIUM'}</span></td>
       <td><span class="status-pill ${a.status||'open'}">${a.status||'open'}</span></td>
       <td style="font-family:var(--font-mono);font-size:11px">${a.analyst_name||'Auto-SIEM'}</td>
-      <td><button class="icon-btn" onclick="showToast('✓ Incident ${i+1} assigné')">▶</button></td>`;
+      <td style="display:flex;gap:6px">
+        <button class="icon-btn" onclick="showToast('✓ Incident assigné')">▶</button>
+        <button class="icon-btn" style="color:var(--cyan);border-color:var(--cyan)" 
+          onclick="generateScribeReport('${a.id}')" title="Générer rapport SCRIBE">📋</button>
+      </td>`;
     tbody.appendChild(tr);
   });
+}
+
+
+// ════════════════════════════════════════════
+// SCRIBE — Génération de rapports IA
+// ════════════════════════════════════════════
+async function generateScribeReport(alertId) {
+  if (!alertId || alertId === 'undefined') {
+    showToast('⚠ Alerte sans ID — disponible uniquement sur les alertes réelles');
+    return;
+  }
+  showToast('⏳ SCRIBE génère le rapport...');
+  try {
+    const res = await apiCall('/agents/scribe/incident', {
+      method: 'POST',
+      body: JSON.stringify({ alertId })
+    });
+    if (!res?.report) { showToast('❌ Erreur génération rapport'); return; }
+    displayScribeReport(res.report);
+  } catch (e) {
+    showToast('❌ Erreur SCRIBE: ' + e.message);
+  }
+}
+
+function displayScribeReport(report) {
+  const ex = report.executiveSummary;
+  const tech = report.technicalAnalysis;
+  const recs = report.recommendations;
+  const comp = report.compliance;
+
+  const modal = document.createElement('div');
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:800px;width:100%;max-height:90vh;overflow-y:auto;padding:32px;position:relative">
+      
+      <button onclick="this.closest('[style*=fixed]').remove()" 
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px">
+        <div style="font-size:11px;letter-spacing:3px;color:var(--cyan)">SCRIBE REPORT</div>
+        <div style="font-size:11px;color:var(--text-dim)">${report.reportId}</div>
+        <div style="margin-left:auto;background:var(--red-dim);color:var(--red);
+                    padding:4px 12px;border-radius:4px;font-size:11px;font-weight:700">
+          ${ex?.riskLevel || 'N/A'}
+        </div>
+      </div>
+
+      <h2 style="font-size:18px;color:var(--text-bright);margin-bottom:8px">${ex?.headline || ''}</h2>
+      <p style="color:var(--text-dim);font-size:13px;margin-bottom:24px">${ex?.businessImpact || ''}</p>
+
+      <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;
+                  padding:16px;margin-bottom:20px">
+        <div style="font-size:11px;color:var(--cyan);letter-spacing:2px;margin-bottom:12px">ACTION IMMÉDIATE</div>
+        <p style="color:var(--amber);font-size:14px;font-weight:600">${ex?.immediateAction || ''}</p>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+        <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px">
+          <div style="font-size:11px;color:var(--cyan);letter-spacing:2px;margin-bottom:12px">ANALYSE TECHNIQUE</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Type : <span style="color:var(--text)">${tech?.incidentType || ''}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Vecteur : <span style="color:var(--text)">${tech?.attackVector || ''}</span></div>
+          <div style="font-size:12px;color:var(--text-dim)">Cause : <span style="color:var(--text)">${tech?.rootCause || ''}</span></div>
+        </div>
+        <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px">
+          <div style="font-size:11px;color:var(--cyan);letter-spacing:2px;margin-bottom:12px">CONFORMITÉ</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">RGPD : <span style="color:${comp?.rgpdImpact?'var(--red)':'var(--green)'}">${comp?.rgpdImpact ? '⚠ Impact' : '✓ Non impacté'}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">CNDP : <span style="color:${comp?.cndpNotification?'var(--red)':'var(--green)'}">${comp?.cndpNotification ? '⚠ Notification requise' : '✓ Non requis'}</span></div>
+          <div style="font-size:12px;color:var(--text-dim)">ISO : <span style="color:var(--text)">${comp?.isoControl || ''}</span></div>
+        </div>
+      </div>
+
+      <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px;margin-bottom:20px">
+        <div style="font-size:11px;color:var(--cyan);letter-spacing:2px;margin-bottom:12px">RECOMMANDATIONS IMMÉDIATES</div>
+        ${(recs?.immediate || []).map(r => `
+          <div style="display:flex;align-items:start;gap:12px;margin-bottom:10px">
+            <div style="background:var(--red-dim);color:var(--red);padding:2px 8px;
+                        border-radius:4px;font-size:11px;font-weight:700;white-space:nowrap">P${r.priority}</div>
+            <div>
+              <div style="font-size:13px;color:var(--text)">${r.action}</div>
+              <div style="font-size:11px;color:var(--text-dim)">${r.responsible} · ${r.deadline}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;
+                  border-top:1px solid var(--line);padding-top:16px">
+        <div style="font-size:11px;color:var(--text-dim)">
+          Généré par SCRIBE v${report.metadata?.agentVersion?.split('-')[1] || '1.0'} · 
+          ${report.metadata?.engine || 'IA Sore Security'}
+        </div>
+        <button onclick="this.closest('[style*=fixed]').remove()"
+          style="background:var(--cyan-dim);color:var(--cyan);border:1px solid var(--cyan);
+                 padding:8px 20px;border-radius:4px;cursor:pointer;font-size:13px">
+          Fermer
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  showToast('✅ Rapport SCRIBE généré');
 }
 
 function getDemoAlerts() {
