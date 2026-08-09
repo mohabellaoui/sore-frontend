@@ -679,6 +679,7 @@ select.form-input option{background:var(--surface)}
       <div class="tb-btn active" onclick="nav('dashboard')" data-page="dashboard"><span class="tb-icon">⬡</span><span>War Room</span></div>
       <div class="tb-btn" onclick="nav('soc')" data-page="soc"><span class="tb-icon">◉</span><span>SOC</span></div>
       <div class="tb-btn" onclick="nav('logs')" data-page="logs"><span class="tb-icon">▤</span><span>Logs</span></div>
+      <div class="tb-btn" onclick="nav('usecases')" data-page="usecases"><span class="tb-icon">⚙</span><span>Use Cases</span></div>
       <div class="tb-btn" onclick="nav('reports')" data-page="reports"><span class="tb-icon">▦</span><span>Rapports</span></div>
       <div class="tb-btn" onclick="nav('services')" data-page="services"><span class="tb-icon">◈</span><span>Services</span></div>
       <div class="tb-btn" onclick="nav('commande')" data-page="commande"><span class="tb-icon">◇</span><span>Commander</span></div>
@@ -894,6 +895,22 @@ select.form-input option{background:var(--surface)}
             <div id="logs-top-usecases"></div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- ══ USE CASES ══ -->
+    <div class="page" id="page-usecases">
+      <div class="section-header">
+        <div><div class="section-title">Use Case Builder</div><div class="section-sub" id="uc-sub">Règles de détection du moteur Log Collection</div></div>
+        <button class="action-btn primary" onclick="openUseCaseModal(null)">+ Nouveau use case</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Use cases</div>
+        <div class="table-wrap"><table class="data-table" id="uc-table">
+          <thead><tr><th>Nom</th><th>Sévérité</th><th>Tactique MITRE</th><th>Technique</th><th>Portée</th><th>Statut</th><th></th></tr></thead>
+          <tbody id="uc-tbody"><tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+        </table></div>
       </div>
     </div>
 
@@ -1194,6 +1211,7 @@ function nav(page) {
   if (page === 'soc') loadSOC();
   if (page === 'dashboard') loadDashboard();
   if (page === 'logs') loadLogs();
+  if (page === 'usecases') loadUseCases();
 }
 
 // ════════════════════════════════════════════
@@ -1447,6 +1465,286 @@ function showLogDetail(index) {
     </div>
   `;
   document.body.appendChild(modal);
+}
+
+// ════════════════════════════════════════════
+// USE CASE BUILDER — Règles de détection
+// ════════════════════════════════════════════
+let ucList = [];
+let ucClientsCache = [];
+let ucEditingId = null;
+let ucEditingOriginal = null;
+
+function escAttr(s) { return String(s == null ? '' : s).replace(/"/g, '&quot;'); }
+function escHtml(s) { return String(s == null ? '' : s).replace(/</g, '&lt;'); }
+
+async function loadUseCases() {
+  const [ucRes, clientsRes] = await Promise.all([
+    apiCall('/use-cases'),
+    apiCall('/clients?limit=100'),
+  ]);
+  ucClientsCache = clientsRes?.data || [];
+
+  const tbody = document.getElementById('uc-tbody');
+  const sub = document.getElementById('uc-sub');
+
+  if (!ucRes) {
+    ucList = [];
+    sub.textContent = 'Accès réservé aux administrateurs et analystes';
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune donnée — accès insuffisant ou erreur réseau</td></tr>`;
+    return;
+  }
+
+  ucList = ucRes.data || [];
+  sub.textContent = `${ucList.length} règle(s) · ${ucList.filter(u => u.enabled).length} active(s)`;
+  renderUseCasesTable();
+}
+
+function ucClientName(tenantId) {
+  if (!tenantId) return 'Global';
+  const c = ucClientsCache.find(c => c.id === tenantId);
+  return c ? c.name : tenantId.slice(0, 8) + '…';
+}
+
+function renderUseCasesTable() {
+  const tbody = document.getElementById('uc-tbody');
+  if (!ucList.length) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun use case — créez-en un pour démarrer la détection</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  ucList.forEach(uc => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-weight:600;color:var(--text-bright)">${escHtml(uc.name)}</td>
+      <td><span class="sev-badge ${uc.severity || 'medium'}">${(uc.severity || 'medium').toUpperCase()}</span></td>
+      <td style="font-family:var(--font-mono);font-size:11px">${escHtml(uc.mitre_tactic) || '—'}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--cyan)">${escHtml(uc.mitre_technique) || '—'}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${ucClientName(uc.tenant_id)}</td>
+      <td>
+        <button class="action-btn" style="border-color:${uc.enabled ? 'rgba(0,255,136,.4)' : 'rgba(255,45,85,.4)'};color:${uc.enabled ? 'var(--green)' : 'var(--red)'}"
+          onclick="toggleUseCase('${uc.id}', ${!uc.enabled})">${uc.enabled ? '● Actif' : '○ Inactif'}</button>
+      </td>
+      <td style="display:flex;gap:6px">
+        <button class="icon-btn" onclick="openUseCaseModal('${uc.id}')" title="Modifier">✎</button>
+        <button class="icon-btn" style="color:var(--red);border-color:rgba(255,45,85,.3)" onclick="deleteUseCase('${uc.id}','${escAttr(uc.name)}')" title="Supprimer">🗑</button>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function toggleUseCase(id, newEnabled) {
+  const res = await apiCall(`/use-cases/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled: newEnabled }) });
+  if (!res) { showToast('❌ Erreur mise à jour du statut'); return; }
+  showToast(newEnabled ? '✅ Use case activé' : '⏸ Use case désactivé');
+  loadUseCases();
+}
+
+async function deleteUseCase(id, name) {
+  if (!confirm(`Supprimer le use case "${name}" ? Cette action est irréversible.`)) return;
+  const res = await apiCall(`/use-cases/${id}`, { method: 'DELETE' });
+  if (!res) { showToast('❌ Erreur suppression'); return; }
+  showToast('🗑 Use case supprimé');
+  loadUseCases();
+}
+
+function closeUseCaseModal() {
+  document.getElementById('ucm-overlay')?.remove();
+}
+
+function openUseCaseModal(id) {
+  ucEditingId = id;
+  const uc = id ? ucList.find(u => u.id === id) : null;
+  ucEditingOriginal = uc ? { conditions: uc.conditions || {}, actions: uc.actions || [] } : { conditions: {}, actions: [] };
+  const c = ucEditingOriginal.conditions;
+  const actionTypes = (ucEditingOriginal.actions || []).map(a => a.type);
+
+  const logTypeVal = Array.isArray(c.log_type) ? c.log_type[0] : (c.log_type || 'authentication');
+  const logTypeWarning = Array.isArray(c.log_type) && c.log_type.length > 1
+    ? `<div style="font-size:10px;color:var(--amber);margin-top:4px">⚠ Règle avancée multi-types (${c.log_type.join(', ')}) — la sauvegarde la réduira à un seul type.</div>` : '';
+  const aggVal = c.aggregate || {};
+  const otherKeys = Object.keys(c).filter(k => !['log_type','outcome','severity_min','keywords','time_range','aggregate'].includes(k));
+  const advancedNote = otherKeys.length
+    ? `<div style="font-size:10px;color:var(--text-dim);margin-top:10px">ℹ Conditions avancées non éditables ici (préservées telles quelles) : <span style="color:var(--cyan);font-family:monospace">${otherKeys.join(', ')}</span></div>` : '';
+
+  const clientOptions = ucClientsCache.map(cl =>
+    `<option value="${cl.id}" ${uc?.tenant_id === cl.id ? 'selected' : ''}>${escHtml(cl.name)}</option>`).join('');
+
+  const sevOptions = (val) => ['info','low','medium','high','critical']
+    .map(s => `<option value="${s}" ${val === s ? 'selected' : ''}>${s}</option>`).join('');
+
+  const modal = document.createElement('div');
+  modal.id = 'ucm-overlay';
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:760px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="closeUseCaseModal()"
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:24px">
+        ${id ? 'MODIFIER LE USE CASE' : 'NOUVEAU USE CASE'}
+      </div>
+
+      <div class="form-grid" style="margin-bottom:8px">
+        <div class="form-group"><label class="form-label">Nom</label>
+          <input class="form-input" id="ucm-name" placeholder="Ex: Brute Force RDP" value="${escAttr(uc?.name)}"/></div>
+        <div class="form-group"><label class="form-label">Sévérité</label>
+          <select class="form-input" id="ucm-severity">${sevOptions(uc?.severity || 'medium')}</select></div>
+      </div>
+      <div class="form-group"><label class="form-label">Description</label>
+        <textarea class="form-input" id="ucm-desc" rows="2" placeholder="Décrit ce que détecte cette règle...">${escHtml(uc?.description)}</textarea></div>
+
+      <div class="form-grid" style="margin-bottom:8px">
+        <div class="form-group"><label class="form-label">Tactique MITRE</label>
+          <input class="form-input" id="ucm-tactic" placeholder="Ex: Credential Access" value="${escAttr(uc?.mitre_tactic)}"/></div>
+        <div class="form-group"><label class="form-label">Technique MITRE</label>
+          <input class="form-input" id="ucm-technique" placeholder="Ex: T1110" value="${escAttr(uc?.mitre_technique)}"/></div>
+      </div>
+      <div class="form-group"><label class="form-label">Portée (tenant)</label>
+        <select class="form-input" id="ucm-client">
+          <option value="">Global (tous les clients)</option>
+          ${clientOptions}
+        </select>
+      </div>
+
+      <div style="border-top:1px solid var(--line2);margin:20px 0;padding-top:20px">
+        <div class="card-title" style="margin-bottom:14px"><span class="dot" style="background:var(--amber)"></span>Conditions</div>
+
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <input type="checkbox" id="ucm-c-logtype-en" ${c.log_type ? 'checked' : ''}/>
+          <label class="form-label" style="margin:0;min-width:150px">log_type =</label>
+          <select class="form-input" id="ucm-c-logtype" style="max-width:220px">
+            ${['authentication','network','system','application','endpoint'].map(t => `<option value="${t}" ${logTypeVal===t?'selected':''}>${t}</option>`).join('')}
+          </select>
+        </div>
+        ${logTypeWarning}
+
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <input type="checkbox" id="ucm-c-outcome-en" ${c.outcome ? 'checked' : ''}/>
+          <label class="form-label" style="margin:0;min-width:150px">outcome =</label>
+          <select class="form-input" id="ucm-c-outcome" style="max-width:220px">
+            <option value="failure" ${c.outcome==='failure'?'selected':''}>failure</option>
+            <option value="success" ${c.outcome==='success'?'selected':''}>success</option>
+          </select>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <input type="checkbox" id="ucm-c-sevmin-en" ${c.severity_min ? 'checked' : ''}/>
+          <label class="form-label" style="margin:0;min-width:150px">severity ≥</label>
+          <select class="form-input" id="ucm-c-sevmin" style="max-width:220px">
+            <option value="medium" ${c.severity_min==='medium'?'selected':''}>medium</option>
+            <option value="high" ${c.severity_min==='high'?'selected':''}>high</option>
+            <option value="critical" ${c.severity_min==='critical'?'selected':''}>critical</option>
+          </select>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <input type="checkbox" id="ucm-c-keywords-en" ${c.keywords ? 'checked' : ''}/>
+          <label class="form-label" style="margin:0;min-width:150px">keywords contient</label>
+          <input class="form-input" id="ucm-c-keywords" placeholder="malware, ransomware, trojan" value="${escAttr((c.keywords||[]).join(', '))}"/>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <input type="checkbox" id="ucm-c-offhours-en" ${c.time_range ? 'checked' : ''}/>
+          <label class="form-label" style="margin:0">Hors heures <span style="color:var(--text-dim);text-transform:none">(22h–6h, fixe)</span></label>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+          <input type="checkbox" id="ucm-c-agg-en" ${c.aggregate ? 'checked' : ''}/>
+          <label class="form-label" style="margin:0">Agrégation :</label>
+          <input class="form-input" id="ucm-c-agg-count" type="number" min="1" style="width:70px" value="${aggVal.min_count || 5}"/>
+          <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">événements en</span>
+          <input class="form-input" id="ucm-c-agg-minutes" type="number" min="1" style="width:70px" value="${aggVal.window_minutes || 5}"/>
+          <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">min depuis même</span>
+          <select class="form-input" id="ucm-c-agg-groupby" style="max-width:160px">
+            <option value="ip_address" ${(aggVal.group_by||'ip_address')==='ip_address'?'selected':''}>IP</option>
+            <option value="host" ${aggVal.group_by==='host'?'selected':''}>Host</option>
+          </select>
+        </div>
+        ${advancedNote}
+      </div>
+
+      <div style="border-top:1px solid var(--line2);margin:20px 0;padding-top:20px">
+        <div class="card-title" style="margin-bottom:14px"><span class="dot" style="background:var(--red)"></span>Actions</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <input type="checkbox" id="ucm-a-alert" ${actionTypes.includes('create_alert') || !id ? 'checked' : ''}/>
+          <label class="form-label" style="margin:0">Créer une alerte SOC (create_alert)</label>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <input type="checkbox" id="ucm-a-notify" ${actionTypes.includes('notify') ? 'checked' : ''}/>
+          <label class="form-label" style="margin:0">Notifier le client — HERALD (notify)</label>
+        </div>
+        <div style="font-size:10px;color:var(--text-dim)">ℹ La sévérité de l'alerte reprend la sévérité du use case définie ci-dessus.</div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:20px;margin-top:8px">
+        <button class="action-btn" onclick="closeUseCaseModal()">Annuler</button>
+        <button class="action-btn primary" id="ucm-save-btn" onclick="saveUseCase()">Sauvegarder</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+async function saveUseCase() {
+  const name = document.getElementById('ucm-name').value.trim();
+  if (name.length < 2) { showToast('⚠ Le nom doit contenir au moins 2 caractères'); return; }
+
+  const description = document.getElementById('ucm-desc').value.trim();
+  const severity = document.getElementById('ucm-severity').value;
+  const mitreTactic = document.getElementById('ucm-tactic').value.trim() || null;
+  const mitreTechnique = document.getElementById('ucm-technique').value.trim() || null;
+  const clientId = document.getElementById('ucm-client').value || null;
+
+  const conditions = { ...(ucEditingOriginal.conditions || {}) };
+  ['log_type', 'outcome', 'severity_min', 'keywords', 'time_range', 'aggregate'].forEach(k => delete conditions[k]);
+
+  if (document.getElementById('ucm-c-logtype-en').checked) conditions.log_type = document.getElementById('ucm-c-logtype').value;
+  if (document.getElementById('ucm-c-outcome-en').checked) conditions.outcome = document.getElementById('ucm-c-outcome').value;
+  if (document.getElementById('ucm-c-sevmin-en').checked) conditions.severity_min = document.getElementById('ucm-c-sevmin').value;
+  if (document.getElementById('ucm-c-keywords-en').checked) {
+    const kw = document.getElementById('ucm-c-keywords').value.split(',').map(s => s.trim()).filter(Boolean);
+    if (kw.length) conditions.keywords = kw;
+  }
+  if (document.getElementById('ucm-c-offhours-en').checked) conditions.time_range = { start_hour: 22, end_hour: 6 };
+  if (document.getElementById('ucm-c-agg-en').checked) {
+    conditions.aggregate = {
+      min_count: Math.max(1, +document.getElementById('ucm-c-agg-count').value || 5),
+      window_minutes: Math.max(1, +document.getElementById('ucm-c-agg-minutes').value || 5),
+      group_by: document.getElementById('ucm-c-agg-groupby').value,
+    };
+  }
+
+  const actions = [];
+  if (document.getElementById('ucm-a-alert').checked) actions.push({ type: 'create_alert' });
+  if (document.getElementById('ucm-a-notify').checked) actions.push({ type: 'notify' });
+
+  const payload = { name, description, severity, mitreTactic, mitreTechnique, conditions, actions, clientId };
+
+  const btn = document.getElementById('ucm-save-btn');
+  btn.disabled = true; btn.textContent = 'Sauvegarde...';
+
+  const res = ucEditingId
+    ? await apiCall(`/use-cases/${ucEditingId}`, { method: 'PATCH', body: JSON.stringify(payload) })
+    : await apiCall('/use-cases', { method: 'POST', body: JSON.stringify(payload) });
+
+  if (!res) {
+    showToast('❌ Erreur sauvegarde — vérifiez les champs');
+    btn.disabled = false; btn.textContent = 'Sauvegarder';
+    return;
+  }
+
+  showToast(ucEditingId ? '✅ Use case mis à jour' : '✅ Use case créé');
+  closeUseCaseModal();
+  loadUseCases();
 }
 
 // ════════════════════════════════════════════
