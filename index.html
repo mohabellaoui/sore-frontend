@@ -680,6 +680,7 @@ select.form-input option{background:var(--surface)}
       <div class="tb-btn" onclick="nav('soc')" data-page="soc"><span class="tb-icon">◉</span><span>SOC</span></div>
       <div class="tb-btn" onclick="nav('logs')" data-page="logs"><span class="tb-icon">▤</span><span>Logs</span></div>
       <div class="tb-btn" onclick="nav('usecases')" data-page="usecases"><span class="tb-icon">⚙</span><span>Use Cases</span></div>
+      <div class="tb-btn" onclick="nav('playbooks')" data-page="playbooks"><span class="tb-icon">🎭</span><span>Playbooks</span></div>
       <div class="tb-btn" onclick="nav('reports')" data-page="reports"><span class="tb-icon">▦</span><span>Rapports</span></div>
       <div class="tb-btn" onclick="nav('services')" data-page="services"><span class="tb-icon">◈</span><span>Services</span></div>
       <div class="tb-btn" onclick="nav('commande')" data-page="commande"><span class="tb-icon">◇</span><span>Commander</span></div>
@@ -910,6 +911,22 @@ select.form-input option{background:var(--surface)}
         <div class="table-wrap"><table class="data-table" id="uc-table">
           <thead><tr><th>Nom</th><th>Sévérité</th><th>Tactique MITRE</th><th>Technique</th><th>Portée</th><th>Statut</th><th></th></tr></thead>
           <tbody id="uc-tbody"><tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ══ PLAYBOOKS ══ -->
+    <div class="page" id="page-playbooks">
+      <div class="section-header">
+        <div><div class="section-title">Playbook Runner</div><div class="section-sub" id="pb-sub">Procédures de réponse à incident</div></div>
+        <button class="action-btn" onclick="loadPlaybooks()">↺ Actualiser</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Playbooks actifs</div>
+        <div class="table-wrap"><table class="data-table" id="pb-table">
+          <thead><tr><th>Nom</th><th>Sévérité</th><th>Use case déclencheur</th><th>Étapes</th><th></th></tr></thead>
+          <tbody id="pb-tbody"><tr><td colspan="5" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
         </table></div>
       </div>
     </div>
@@ -1212,6 +1229,7 @@ function nav(page) {
   if (page === 'dashboard') loadDashboard();
   if (page === 'logs') loadLogs();
   if (page === 'usecases') loadUseCases();
+  if (page === 'playbooks') loadPlaybooks();
 }
 
 // ════════════════════════════════════════════
@@ -1271,6 +1289,8 @@ async function loadDashboard() {
 
 function refreshDashboard() { loadDashboard(); showToast('↺ Données actualisées'); }
 
+let socCurrentAlerts = [];
+
 async function loadSOC() {
   const alerts = await apiCall('/alerts?limit=10') || { data: getDemoAlerts() };
   const open = alerts.data.filter(a => a.status === 'open' || a.status === 'investigating');
@@ -1278,9 +1298,10 @@ async function loadSOC() {
   document.getElementById('soc-open').textContent = open.length || 3;
   document.getElementById('soc-critical').textContent = critical.length || 1;
 
+  socCurrentAlerts = alerts.data.slice(0, 6);
   const tbody = document.getElementById('soc-tbody');
   tbody.innerHTML = '';
-  (alerts.data.slice(0,6)).forEach((a, i) => {
+  socCurrentAlerts.forEach((a, i) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">#INC-${String(90-i).padStart(3,'0')}</td>
@@ -1290,10 +1311,12 @@ async function loadSOC() {
       <td style="font-family:var(--font-mono);font-size:11px">${a.analyst_name||'Auto-SIEM'}</td>
       <td style="display:flex;gap:6px">
         <button class="icon-btn" onclick="showToast('✓ Incident assigné')">▶</button>
-        <button class="icon-btn" style="color:var(--cyan);border-color:var(--cyan)" 
+        <button class="icon-btn" style="color:var(--cyan);border-color:var(--cyan)"
           onclick="generateScribeReport('${a.id}')" title="Générer rapport SCRIBE">📋</button>
-        <button class="icon-btn" style="color:var(--green);border-color:var(--green)" 
+        <button class="icon-btn" style="color:var(--green);border-color:var(--green)"
           onclick="sentinelTriage('${a.id}')" title="Triage SENTINEL">🔍</button>
+        <button class="icon-btn" style="color:var(--amber);border-color:var(--amber)"
+          onclick="launchPlaybookForAlert(${i})" title="Lancer le playbook associé">🎭</button>
       </td>`;
     tbody.appendChild(tr);
   });
@@ -1745,6 +1768,225 @@ async function saveUseCase() {
   showToast(ucEditingId ? '✅ Use case mis à jour' : '✅ Use case créé');
   closeUseCaseModal();
   loadUseCases();
+}
+
+// ════════════════════════════════════════════
+// PLAYBOOK RUNNER — Exécution des playbooks
+// ════════════════════════════════════════════
+let pbList = null;
+let pbRunnerState = null; // { playbook, steps: [{step,title,description,status,note}], alertContext, escalatingIndex }
+
+async function getPlaybooksCache(force = false) {
+  if (pbList && !force) return pbList;
+  const res = await apiCall('/playbooks');
+  pbList = res?.data || null;
+  return pbList;
+}
+
+async function loadPlaybooks() {
+  const list = await getPlaybooksCache(true);
+  const tbody = document.getElementById('pb-tbody');
+  const sub = document.getElementById('pb-sub');
+
+  if (!list) {
+    sub.textContent = 'Accès réservé aux administrateurs et analystes';
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune donnée — accès insuffisant ou erreur réseau</td></tr>`;
+    return;
+  }
+
+  const active = list.filter(p => p.enabled);
+  sub.textContent = `${active.length} playbook(s) actif(s) sur ${list.length} au total`;
+
+  if (!active.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun playbook actif</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = '';
+  active.forEach(pb => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-weight:600;color:var(--text-bright)">${escHtml(pb.name)}</td>
+      <td><span class="sev-badge ${pb.trigger_severity || 'medium'}">${(pb.trigger_severity || '—').toUpperCase()}</span></td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--cyan)">${escHtml(pb.trigger_use_case) || '—'}</td>
+      <td style="font-family:var(--font-mono);font-size:11px">${(pb.steps || []).length} étape(s)</td>
+      <td><button class="action-btn primary" onclick="openPlaybookRunner('${pb.id}')">▶ Lancer</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function launchPlaybookForAlert(index) {
+  const alert = socCurrentAlerts[index];
+  if (!alert || !alert.id) { showToast('⚠ Disponible uniquement sur les alertes réelles'); return; }
+  const list = await getPlaybooksCache();
+  if (!list) { showToast('❌ Erreur chargement des playbooks'); return; }
+  const pb = list.find(p => p.enabled && p.trigger_use_case === alert.title);
+  if (!pb) { showToast(`⚠ Aucun playbook actif pour "${alert.title}"`); return; }
+  openPlaybookRunner(pb.id, { alertId: alert.id, alertTitle: alert.title });
+}
+
+function openPlaybookRunner(playbookId, alertContext = null) {
+  const pb = pbList?.find(p => p.id === playbookId);
+  if (!pb) { showToast('❌ Playbook introuvable — rechargez la liste'); return; }
+  const steps = pb.steps || [];
+  if (!steps.length) { showToast('⚠ Ce playbook ne contient aucune étape'); return; }
+
+  pbRunnerState = {
+    playbook: pb,
+    alertContext,
+    steps: steps.map((s, i) => ({ ...s, status: i === 0 ? 'in_progress' : 'pending', note: '' })),
+    escalatingIndex: null,
+  };
+
+  const modal = document.createElement('div');
+  modal.id = 'pbr-overlay';
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+  document.body.appendChild(modal);
+  renderPlaybookRunner();
+}
+
+function pbStepStatusLabel(status) {
+  return { pending: 'En attente', in_progress: 'En cours', done: 'Terminé', escalated: 'Escaladé' }[status] || status;
+}
+function pbStepStatusColor(status) {
+  return { pending: 'var(--text-dim)', in_progress: 'var(--cyan)', done: 'var(--green)', escalated: 'var(--amber)' }[status] || 'var(--text-dim)';
+}
+
+function renderPlaybookRunner() {
+  const modal = document.getElementById('pbr-overlay');
+  if (!modal || !pbRunnerState) return;
+  const { playbook, steps, alertContext, escalatingIndex } = pbRunnerState;
+
+  const doneCount = steps.filter(s => s.status === 'done' || s.status === 'escalated').length;
+  const pct = Math.round((doneCount / steps.length) * 100);
+  const currentIndex = steps.findIndex(s => s.status === 'in_progress');
+  const allResolved = doneCount === steps.length;
+
+  const stepsHtml = steps.map((s, i) => {
+    const isCurrent = s.status === 'in_progress';
+    const isEscalating = escalatingIndex === i;
+    let actionsHtml = '';
+    if (isEscalating) {
+      actionsHtml = `
+        <div style="margin-top:10px">
+          <textarea class="form-input" id="pbr-esc-note-${i}" rows="2" placeholder="Raison de l'escalade, personne/équipe contactée..."></textarea>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="action-btn" onclick="cancelEscalate()">Annuler</button>
+            <button class="action-btn primary" onclick="confirmEscalate(${i})">Confirmer l'escalade</button>
+          </div>
+        </div>`;
+    } else if (isCurrent) {
+      actionsHtml = `
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="action-btn primary" onclick="markStepDone(${i})">✓ Marquer comme fait</button>
+          <button class="action-btn" style="border-color:rgba(255,170,0,.4);color:var(--amber)" onclick="startEscalate(${i})">⚠ Escalader</button>
+        </div>`;
+    } else if (s.status === 'escalated' && s.note) {
+      actionsHtml = `<div style="margin-top:8px;font-size:11px;color:var(--amber);font-family:var(--font-mono)">Note : ${escHtml(s.note)}</div>`;
+    }
+
+    return `
+      <div style="background:${isCurrent ? 'var(--overlay)' : 'var(--elevated)'};border:1px solid ${isCurrent ? 'var(--cyan)' : 'var(--line2)'};
+                  border-radius:6px;padding:16px;margin-bottom:10px;opacity:${s.status === 'pending' ? 0.55 : 1}">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:24px;height:24px;border-radius:50%;background:${pbStepStatusColor(s.status)};
+                        display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#000;flex-shrink:0">
+              ${s.status === 'done' ? '✓' : s.status === 'escalated' ? '⚠' : s.step}
+            </div>
+            <div style="font-weight:600;color:var(--text-bright);font-size:14px">${escHtml(s.title)}</div>
+          </div>
+          <span style="font-family:var(--font-mono);font-size:10px;color:${pbStepStatusColor(s.status)};text-transform:uppercase;letter-spacing:.06em">${pbStepStatusLabel(s.status)}</span>
+        </div>
+        <p style="color:var(--text-dim);font-size:13px;margin:8px 0 0 34px;line-height:1.5">${escHtml(s.description)}</p>
+        <div style="margin-left:34px">${actionsHtml}</div>
+      </div>`;
+  }).join('');
+
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:720px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="closePlaybookRunner()"
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:6px">EXÉCUTION DU PLAYBOOK</div>
+      <div style="font-size:20px;font-weight:700;color:var(--text-bright);margin-bottom:4px">${escHtml(playbook.name)}</div>
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-bottom:4px">
+        Use case : <span style="color:var(--cyan)">${escHtml(playbook.trigger_use_case) || 'N/A'}</span>
+        ${alertContext ? ` · Alerte #${alertContext.alertId.slice(0, 8)}` : ''}
+      </div>
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-bottom:16px">
+        Étape ${Math.min((currentIndex === -1 ? steps.length : currentIndex) + 1, steps.length)} / ${steps.length}
+      </div>
+
+      <div style="margin-bottom:20px">
+        <div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:11px;margin-bottom:6px">
+          <span style="color:var(--text-dim)">Progression</span><span style="color:var(--green)">${pct}%</span>
+        </div>
+        <div style="height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--green),#00ffaa);transition:width .4s ease"></div>
+        </div>
+      </div>
+
+      <div>${stepsHtml}</div>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:20px;margin-top:8px">
+        <button class="action-btn" onclick="closePlaybookRunner()">Fermer</button>
+        <button class="action-btn primary" ${allResolved ? '' : 'disabled style="opacity:.4;cursor:not-allowed"'} onclick="finishPlaybook()">🏁 Clôturer le playbook</button>
+      </div>
+    </div>
+  `;
+}
+
+function markStepDone(index) {
+  if (!pbRunnerState) return;
+  const { steps } = pbRunnerState;
+  steps[index].status = 'done';
+  if (steps[index + 1]) steps[index + 1].status = 'in_progress';
+  renderPlaybookRunner();
+}
+
+function startEscalate(index) {
+  if (!pbRunnerState) return;
+  pbRunnerState.escalatingIndex = index;
+  renderPlaybookRunner();
+}
+
+function cancelEscalate() {
+  if (!pbRunnerState) return;
+  pbRunnerState.escalatingIndex = null;
+  renderPlaybookRunner();
+}
+
+function confirmEscalate(index) {
+  if (!pbRunnerState) return;
+  const note = document.getElementById(`pbr-esc-note-${index}`)?.value.trim() || '';
+  const { steps } = pbRunnerState;
+  steps[index].status = 'escalated';
+  steps[index].note = note;
+  pbRunnerState.escalatingIndex = null;
+  if (steps[index + 1]) steps[index + 1].status = 'in_progress';
+  renderPlaybookRunner();
+}
+
+function closePlaybookRunner() {
+  document.getElementById('pbr-overlay')?.remove();
+  pbRunnerState = null;
+}
+
+function finishPlaybook() {
+  if (!pbRunnerState) return;
+  const { playbook, steps } = pbRunnerState;
+  const done = steps.filter(s => s.status === 'done').length;
+  const escalated = steps.filter(s => s.status === 'escalated').length;
+  showToast(`🏁 Playbook "${playbook.name}" clôturé — ${done} terminée(s), ${escalated} escaladée(s)`);
+  closePlaybookRunner();
 }
 
 // ════════════════════════════════════════════
