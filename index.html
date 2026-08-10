@@ -1339,6 +1339,8 @@ async function loadSOC() {
           onclick="sentinelTriage('${a.id}')" title="Triage SENTINEL">🔍</button>
         <button class="icon-btn" style="color:var(--amber);border-color:var(--amber)"
           onclick="launchPlaybookForAlert(${i})" title="Lancer le playbook associé">🎭</button>
+        <button class="icon-btn" style="color:var(--red);border-color:var(--red)"
+          onclick="checkAlertIP('${a.ip_address || ''}')" title="Vérifier IP (ORACLE)">🔮</button>
       </td>`;
     tbody.appendChild(tr);
   });
@@ -1401,11 +1403,17 @@ function renderLogsTable(res) {
     tr.onclick = () => showLogDetail(i);
     const time = new Date(log.timestamp).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
     const msg = (log.raw_message || '').length > 60 ? log.raw_message.slice(0, 60) + '…' : (log.raw_message || '');
+    const oracleData = log.normalized?.oracle;
+    const oracleBadge = oracleData
+      ? `<span onclick="event.stopPropagation();showOracleForLog(${i})" title="ORACLE — ${oracleData.riskLevel} · score ${oracleData.abuseScore}/100"
+           style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:6px;cursor:pointer;vertical-align:middle;
+                  background:${oracleData.abuseScore > 70 ? 'var(--red)' : oracleData.abuseScore >= 20 ? 'var(--amber)' : 'var(--green)'}"></span>`
+      : '';
     tr.innerHTML = `
       <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);white-space:nowrap">${time}</td>
       <td style="font-family:var(--font-mono);font-size:11px">${log.source || '—'}</td>
       <td style="font-family:var(--font-mono);font-size:11px">${log.host || '—'}</td>
-      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${log.ip_address || '—'}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${log.ip_address || '—'}${oracleBadge}</td>
       <td style="font-family:var(--font-mono);font-size:11px">${log.log_type || '—'}</td>
       <td><span class="sev-badge ${log.severity || 'info'}">${(log.severity || 'info').toUpperCase()}</span></td>
       <td style="font-family:var(--font-mono);font-size:11px;color:${log.use_case_matched ? 'var(--red)' : 'var(--text-dim)'}">${log.use_case_matched || '—'}</td>
@@ -1501,6 +1509,23 @@ function showLogDetail(index) {
           <div style="font-size:12px;color:var(--text-dim)">Alerte liée : <span style="color:var(--text)">${log.alert_id ? '#' + log.alert_id.slice(0,8) : 'Aucune'}</span></div>
         </div>
       </div>
+
+      ${log.normalized?.oracle ? (() => { const o = log.normalized.oracle; const c = o.abuseScore > 70 ? 'var(--red)' : o.abuseScore >= 20 ? 'var(--amber)' : 'var(--green)'; return `
+      <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <div style="font-size:11px;color:var(--amber);letter-spacing:2px">🔮 THREAT INTELLIGENCE (ORACLE)</div>
+          <span style="margin-left:auto;font-size:16px;font-weight:700;color:${c}">${o.abuseScore}<span style="font-size:10px;color:var(--text-dim)">/100</span></span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;color:var(--text-dim);margin-bottom:10px">
+          <div>Pays : <span style="color:var(--text)">${o.country || '—'}</span></div>
+          <div>ISP : <span style="color:var(--text)">${o.isp || '—'}</span></div>
+          <div>Proxy/VPN : <span style="color:var(--text)">${o.isProxy ? 'Oui' : 'Non'}</span></div>
+          <div>Tor : <span style="color:var(--text)">${o.isTor ? 'Oui' : 'Non'}</span></div>
+        </div>
+        ${(o.tags || []).length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">${o.tags.map(t => `<span style="background:var(--surface);border:1px solid var(--line);color:var(--text-dim);padding:2px 8px;border-radius:4px;font-size:10px;font-family:monospace">${t}</span>`).join('')}</div>` : ''}
+        <div style="font-size:12px;color:var(--text-bright);font-weight:600">${o.recommendation}</div>
+      </div>
+      `; })() : ''}
 
       <div style="margin-bottom:8px">
         <div style="font-size:11px;color:var(--cyan);letter-spacing:2px;margin-bottom:10px">CHAMPS NORMALISÉS</div>
@@ -2009,6 +2034,77 @@ function finishPlaybook() {
   const escalated = steps.filter(s => s.status === 'escalated').length;
   showToast(`🏁 Playbook "${playbook.name}" clôturé — ${done} terminée(s), ${escalated} escaladée(s)`);
   closePlaybookRunner();
+}
+
+// ════════════════════════════════════════════
+// ORACLE — Threat Intelligence
+// ════════════════════════════════════════════
+async function checkAlertIP(ip) {
+  if (!ip || ip === 'undefined') {
+    showToast('⚠ Aucune IP associée à cette alerte');
+    return;
+  }
+  showToast('⏳ ORACLE vérifie ' + ip + '...');
+  try {
+    const res = await apiCall('/agents/oracle/check', { method: 'POST', body: JSON.stringify({ value: ip }) });
+    if (!res?.data) { showToast('❌ Erreur ORACLE'); return; }
+    displayOracleResult(res.data);
+  } catch (e) {
+    showToast('❌ Erreur ORACLE: ' + e.message);
+  }
+}
+
+function showOracleForLog(index) {
+  const log = logsCurrentRows[index];
+  if (log?.normalized?.oracle) displayOracleResult(log.normalized.oracle);
+}
+
+function displayOracleResult(data) {
+  const modal = document.createElement('div');
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+
+  const riskColor = { critical: 'var(--red)', high: 'var(--amber)', medium: 'var(--cyan)', low: 'var(--green)' };
+  const color = riskColor[data.riskLevel] || 'var(--cyan)';
+
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:480px;width:100%;padding:32px;position:relative">
+
+      <button onclick="this.closest('[style*=fixed]').remove()"
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:20px">🔮 ORACLE — THREAT INTEL</div>
+
+      <div style="font-family:var(--font-mono);font-size:16px;color:var(--text-bright);margin-bottom:4px">${data.ip || data.domain}</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
+        <span style="font-size:28px;font-weight:700;color:${color}">${data.abuseScore}</span>
+        <span style="font-size:11px;color:var(--text-dim)">/100 abuse score</span>
+        <span style="margin-left:auto;background:${color};color:#000;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;text-transform:uppercase">${data.riskLevel}</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+        <div><div style="font-size:10px;color:var(--text-dim)">PAYS</div><div style="font-size:13px;color:var(--text)">${data.country || '—'}</div></div>
+        <div><div style="font-size:10px;color:var(--text-dim)">ISP</div><div style="font-size:13px;color:var(--text)">${data.isp || '—'}</div></div>
+        <div><div style="font-size:10px;color:var(--text-dim)">PROXY/VPN</div><div style="font-size:13px;color:var(--text)">${data.isProxy ? 'Oui' : 'Non'}</div></div>
+        <div><div style="font-size:10px;color:var(--text-dim)">TOR</div><div style="font-size:13px;color:var(--text)">${data.isTor ? 'Oui' : 'Non'}</div></div>
+      </div>
+
+      ${(data.tags || []).length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">${data.tags.map(t => `<span style="background:var(--elevated);border:1px solid var(--line);color:var(--text-dim);padding:3px 8px;border-radius:4px;font-size:10px;font-family:monospace">${t}</span>`).join('')}</div>` : ''}
+
+      <div style="background:var(--elevated);border:1px solid ${color};border-radius:6px;padding:14px">
+        <div style="font-size:10px;color:${color};letter-spacing:2px;margin-bottom:6px">RECOMMANDATION</div>
+        <div style="font-size:13px;color:var(--text-bright);font-weight:600">${data.recommendation}</div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
 }
 
 // ════════════════════════════════════════════
