@@ -786,7 +786,10 @@ select.form-input option{background:var(--surface)}
     <div class="page" id="page-soc">
       <div class="section-header">
         <div><div class="section-title">Centre Opérationnel SOC</div><div class="section-sub">Surveillance 24/7/365 · Wazuh SIEM · Analystes dédiés</div></div>
-        <button class="action-btn primary" onclick="showToast('🚨 CSIRT contacté — Temps de réponse &lt;4h garanti')">🚨 Activer CSIRT</button>
+        <div style="display:flex;gap:10px">
+          <button class="action-btn" onclick="runHunterAnalysis()" title="Lancer une analyse de corrélation multi-étapes">🔗 HUNTER</button>
+          <button class="action-btn primary" onclick="showToast('🚨 CSIRT contacté — Temps de réponse &lt;4h garanti')">🚨 Activer CSIRT</button>
+        </div>
       </div>
       <div class="soc-grid">
         <div class="soc-metric"><div class="soc-val" id="soc-open">—</div><div class="soc-lbl">Incidents ouverts</div></div>
@@ -1987,6 +1990,81 @@ function finishPlaybook() {
   const escalated = steps.filter(s => s.status === 'escalated').length;
   showToast(`🏁 Playbook "${playbook.name}" clôturé — ${done} terminée(s), ${escalated} escaladée(s)`);
   closePlaybookRunner();
+}
+
+// ════════════════════════════════════════════
+// HUNTER — Corrélation multi-étapes
+// ════════════════════════════════════════════
+async function runHunterAnalysis() {
+  showToast('⏳ HUNTER analyse les séquences de logs (24h)...');
+  try {
+    const res = await apiCall('/agents/hunter/run', { method: 'POST', body: JSON.stringify({}) });
+    if (!res?.success) { showToast('❌ Erreur HUNTER'); return; }
+    displayHunterResults(res);
+    if (res.totalCorrelations > 0) loadSOC(); // rafraîchit le tableau avec les nouvelles alertes
+  } catch (e) {
+    showToast('❌ Erreur HUNTER: ' + e.message);
+  }
+}
+
+function displayHunterResults(res) {
+  const modal = document.createElement('div');
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+
+  const clientsWithHits = (res.results || []).filter(r => r.correlationsFound > 0);
+  const sevColor = { critical: 'var(--red)', high: 'var(--amber)', medium: 'var(--cyan)' };
+
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:700px;width:100%;max-height:90vh;overflow-y:auto;padding:32px;position:relative">
+
+      <button onclick="this.closest('[style*=fixed]').remove()"
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px">
+        <div style="font-size:11px;letter-spacing:3px;color:var(--cyan)">🔗 HUNTER — CORRÉLATION</div>
+        <div style="margin-left:auto;font-size:28px;font-weight:700;color:${res.totalCorrelations > 0 ? 'var(--red)' : 'var(--green)'}">${res.totalCorrelations}</div>
+      </div>
+
+      <p style="color:var(--text-bright);font-size:14px;margin-bottom:20px">
+        ${res.totalCorrelations > 0
+          ? `${res.totalCorrelations} attaque(s) multi-étapes détectée(s) sur les dernières 24h.`
+          : 'Aucune attaque multi-étapes détectée sur les dernières 24h.'}
+      </p>
+
+      ${clientsWithHits.map(client => `
+        <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px;margin-bottom:12px">
+          <div style="font-size:13px;color:var(--text-bright);font-weight:600;margin-bottom:10px">${client.clientName}</div>
+          ${client.correlations.map(c => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--line)">
+              <div>
+                <div style="font-size:12px;color:var(--text)">${c.pattern.replace(/_/g,' ')}</div>
+                <div style="font-size:11px;color:var(--text-dim);margin-top:2px">${(c.mitre_tactics||[]).join(', ')}</div>
+              </div>
+              <span style="color:${sevColor[c.severity]||'var(--cyan)'};font-size:11px;font-weight:700;text-transform:uppercase">${c.severity}</span>
+            </div>
+          `).join('')}
+        </div>
+      `).join('')}
+
+      <div style="display:flex;justify-content:flex-end;border-top:1px solid var(--line);padding-top:16px">
+        <button onclick="this.closest('[style*=fixed]').remove()"
+          style="background:var(--green-dim);color:var(--green);border:1px solid var(--green);
+                 padding:8px 20px;border-radius:4px;cursor:pointer;font-size:13px">
+          Fermer
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  showToast(res.totalCorrelations > 0 ? `🔗 HUNTER — ${res.totalCorrelations} corrélation(s) détectée(s)` : '✅ HUNTER — aucune corrélation détectée');
 }
 
 // ════════════════════════════════════════════
