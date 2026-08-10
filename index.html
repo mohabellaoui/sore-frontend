@@ -681,6 +681,7 @@ select.form-input option{background:var(--surface)}
       <div class="tb-btn" onclick="nav('logs')" data-page="logs"><span class="tb-icon">▤</span><span>Logs</span></div>
       <div class="tb-btn" onclick="nav('usecases')" data-page="usecases"><span class="tb-icon">⚙</span><span>Use Cases</span></div>
       <div class="tb-btn" onclick="nav('playbooks')" data-page="playbooks"><span class="tb-icon">🎭</span><span>Playbooks</span></div>
+      <div class="tb-btn" onclick="nav('chronicle')" data-page="chronicle"><span class="tb-icon">📜</span><span>Chronicle</span></div>
       <div class="tb-btn" onclick="nav('reports')" data-page="reports"><span class="tb-icon">▦</span><span>Rapports</span></div>
       <div class="tb-btn" onclick="nav('services')" data-page="services"><span class="tb-icon">◈</span><span>Services</span></div>
       <div class="tb-btn" onclick="nav('commande')" data-page="commande"><span class="tb-icon">◇</span><span>Commander</span></div>
@@ -949,6 +950,75 @@ select.form-input option{background:var(--surface)}
           <thead><tr><th>Nom</th><th>Sévérité</th><th>Use case déclencheur</th><th>Étapes</th><th></th></tr></thead>
           <tbody id="pb-tbody"><tr><td colspan="5" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
         </table></div>
+      </div>
+    </div>
+
+    <!-- ══ CHRONICLE ══ -->
+    <div class="page" id="page-chronicle">
+      <div class="section-header">
+        <div><div class="section-title">Chronicle — Audit Trail</div><div class="section-sub" id="chronicle-sub">Traçabilité immuable des actions agents &amp; utilisateurs · chaîne de hash SHA256</div></div>
+        <div style="display:flex;gap:10px">
+          <button class="action-btn" onclick="loadChronicle()">↺ Actualiser</button>
+          <button class="action-btn primary" onclick="exportChronicle()">⬇ Exporter pour audit</button>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card cyan">
+          <div class="stat-label-top">Entrées totales</div>
+          <div class="stat-val cyan" id="chronicle-stat-total">—</div>
+          <div class="stat-sub">chaîne complète</div>
+        </div>
+        <div class="stat-card" id="chronicle-integrity-card">
+          <div class="stat-label-top">Intégrité de la chaîne</div>
+          <div class="stat-val" id="chronicle-stat-integrity" style="font-size:20px">—</div>
+          <div class="stat-sub" id="chronicle-integrity-detail">Vérification en cours...</div>
+        </div>
+        <div class="stat-card amber">
+          <div class="stat-label-top">Résultats filtrés</div>
+          <div class="stat-val amber" id="chronicle-stat-filtered">—</div>
+          <div class="stat-sub">page courante</div>
+        </div>
+        <div class="stat-card green">
+          <div class="stat-label-top">Dernière vérification</div>
+          <div class="stat-val green" id="chronicle-stat-verified" style="font-size:16px">—</div>
+          <div class="stat-sub">horodatage local</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Filtres</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr auto auto;gap:10px;align-items:end">
+          <div><label class="form-label">Type d'acteur</label>
+            <select class="form-input" id="chronicle-f-actortype">
+              <option value="">Tous</option>
+              <option value="agent">agent</option>
+              <option value="user">user</option>
+              <option value="system">system</option>
+            </select>
+          </div>
+          <div><label class="form-label">Action</label><input class="form-input" id="chronicle-f-action" placeholder="ex. SENTINEL_TRIAGE"/></div>
+          <div><label class="form-label">Type de ressource</label><input class="form-input" id="chronicle-f-resourcetype" placeholder="ex. alert"/></div>
+          <div><label class="form-label">De</label><input class="form-input" type="datetime-local" id="chronicle-f-from"/></div>
+          <div><label class="form-label">À</label><input class="form-input" type="datetime-local" id="chronicle-f-to"/></div>
+          <button class="action-btn primary" onclick="applyChronicleFilters()">Filtrer</button>
+          <button class="action-btn" onclick="resetChronicleFilters()">Réinitialiser</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Timeline des événements</div>
+        <div class="table-wrap"><table class="data-table" id="chronicle-table">
+          <thead><tr><th>Heure</th><th>Acteur</th><th>Action</th><th>Ressource</th><th>Résultat</th><th>Client</th><th></th></tr></thead>
+          <tbody id="chronicle-tbody"><tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+        </table></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+          <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)" id="chronicle-page-info">Page 1</span>
+          <div style="display:flex;gap:8px">
+            <button class="action-btn" onclick="changeChroniclePage(-1)">‹ Précédent</button>
+            <button class="action-btn" onclick="changeChroniclePage(1)">Suivant ›</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1251,6 +1321,7 @@ function nav(page) {
   if (page === 'logs') loadLogs();
   if (page === 'usecases') loadUseCases();
   if (page === 'playbooks') loadPlaybooks();
+  if (page === 'chronicle') loadChronicle();
 }
 
 // ════════════════════════════════════════════
@@ -2034,6 +2105,221 @@ function finishPlaybook() {
   const escalated = steps.filter(s => s.status === 'escalated').length;
   showToast(`🏁 Playbook "${playbook.name}" clôturé — ${done} terminée(s), ${escalated} escaladée(s)`);
   closePlaybookRunner();
+}
+
+// ════════════════════════════════════════════
+// CHRONICLE — Audit trail immuable
+// ════════════════════════════════════════════
+let chroniclePage = 1;
+const CHRONICLE_LIMIT = 25;
+let chronicleCurrentRows = [];
+
+function chronicleEscape(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function chronicleQueryParams(extra = {}) {
+  const p = new URLSearchParams();
+  const actorType = document.getElementById('chronicle-f-actortype')?.value;
+  const action = document.getElementById('chronicle-f-action')?.value.trim();
+  const resourceType = document.getElementById('chronicle-f-resourcetype')?.value.trim();
+  const from = document.getElementById('chronicle-f-from')?.value;
+  const to = document.getElementById('chronicle-f-to')?.value;
+  if (actorType) p.set('actorType', actorType);
+  if (action) p.set('action', action);
+  if (resourceType) p.set('resourceType', resourceType);
+  if (from) p.set('from', new Date(from).toISOString());
+  if (to) p.set('to', new Date(to).toISOString());
+  Object.entries(extra).forEach(([k, v]) => p.set(k, v));
+  return p.toString();
+}
+
+async function loadChronicle() {
+  document.getElementById('chronicle-sub').textContent =
+    `Traçabilité immuable des actions agents & utilisateurs · chaîne de hash SHA256 · actualisé ${new Date().toLocaleTimeString('fr-FR')}`;
+
+  const offset = (chroniclePage - 1) * CHRONICLE_LIMIT;
+  const [listRes, verifyRes] = await Promise.all([
+    apiCall(`/chronicle?${chronicleQueryParams({ limit: CHRONICLE_LIMIT, offset })}`),
+    apiCall('/chronicle/verify'),
+  ]);
+
+  renderChronicleTable(listRes);
+  renderChronicleIntegrity(verifyRes);
+}
+
+function chronicleActorBadge(type, id) {
+  const cfg = {
+    agent: { color: 'var(--cyan)', bg: 'var(--cyan-dim)', icon: '🤖' },
+    user: { color: 'var(--green)', bg: 'var(--green-dim)', icon: '👤' },
+    system: { color: 'var(--amber)', bg: 'var(--amber-dim)', icon: '⚙' },
+  }[type] || { color: 'var(--text-dim)', bg: 'rgba(100,100,100,.15)', icon: '?' };
+  return `<span style="display:inline-flex;align-items:center;gap:5px;background:${cfg.bg};color:${cfg.color};
+    border:1px solid ${cfg.color};border-radius:4px;padding:2px 8px;font-size:11px;font-family:var(--font-mono)"
+    title="${chronicleEscape(id || type)}">${cfg.icon} ${chronicleEscape(id || type)}</span>`;
+}
+
+function chronicleResultBadge(result) {
+  const cfg = {
+    success: { color: 'var(--green)', bg: 'var(--green-dim)' },
+    failure: { color: 'var(--red)', bg: 'var(--red-dim)' },
+    partial: { color: 'var(--amber)', bg: 'var(--amber-dim)' },
+  }[result] || { color: 'var(--text-dim)', bg: 'rgba(100,100,100,.15)' };
+  return `<span style="background:${cfg.bg};color:${cfg.color};border:1px solid ${cfg.color};
+    border-radius:4px;padding:2px 8px;font-size:10px;font-family:var(--font-mono);text-transform:uppercase">${result}</span>`;
+}
+
+function renderChronicleTable(res) {
+  const tbody = document.getElementById('chronicle-tbody');
+  const sub = document.getElementById('chronicle-sub');
+  const rows = res?.data || [];
+  chronicleCurrentRows = rows;
+
+  document.getElementById('chronicle-page-info').textContent = `Page ${chroniclePage}`;
+  document.getElementById('chronicle-stat-filtered').textContent = rows.length;
+
+  if (!res) {
+    sub.textContent = 'Accès réservé aux administrateurs et analystes';
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune donnée — accès insuffisant ou erreur réseau</td></tr>`;
+    return;
+  }
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune entrée trouvée</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = '';
+  rows.forEach((e, i) => {
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.onclick = () => showChronicleDetail(i);
+    const time = new Date(e.timestamp).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    tr.innerHTML = `
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);white-space:nowrap">${time}</td>
+      <td>${chronicleActorBadge(e.actor_type, e.actor_id)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px">${chronicleEscape(e.action)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${chronicleEscape(e.resource_type || '—')}</td>
+      <td>${chronicleResultBadge(e.result)}</td>
+      <td style="font-size:12px;color:var(--text-dim)">${chronicleEscape(e.tenant_name || '—')}</td>
+      <td><button class="icon-btn" onclick="event.stopPropagation();showChronicleDetail(${i})" title="Voir le détail">👁</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderChronicleIntegrity(res) {
+  const totalEl = document.getElementById('chronicle-stat-total');
+  const integrityEl = document.getElementById('chronicle-stat-integrity');
+  const detailEl = document.getElementById('chronicle-integrity-detail');
+  const verifiedEl = document.getElementById('chronicle-stat-verified');
+  const card = document.getElementById('chronicle-integrity-card');
+  const v = res?.data;
+
+  if (!v) {
+    totalEl.textContent = '—';
+    integrityEl.textContent = '—';
+    detailEl.textContent = 'Vérification indisponible';
+    verifiedEl.textContent = '—';
+    return;
+  }
+
+  totalEl.textContent = v.totalEntries;
+  verifiedEl.textContent = new Date(v.verifiedAt).toLocaleTimeString('fr-FR');
+
+  if (v.intact) {
+    integrityEl.innerHTML = `<span style="color:var(--green)">🟢 Chaîne intègre</span>`;
+    detailEl.textContent = `${v.entriesChecked} entrée(s) vérifiée(s), aucune anomalie`;
+    card.style.borderColor = 'rgba(0,255,136,.3)';
+  } else {
+    integrityEl.innerHTML = `<span style="color:var(--red)">🔴 Anomalie détectée</span>`;
+    detailEl.textContent = `Rupture à la séquence #${v.brokenAt?.seq} (${v.brokenAt?.action || 'inconnue'})`;
+    card.style.borderColor = 'rgba(255,45,85,.3)';
+    showToast('🔴 CHRONICLE — anomalie détectée dans la chaîne d\'audit');
+  }
+}
+
+function applyChronicleFilters() { chroniclePage = 1; loadChronicle(); }
+function resetChronicleFilters() {
+  ['chronicle-f-actortype', 'chronicle-f-action', 'chronicle-f-resourcetype', 'chronicle-f-from', 'chronicle-f-to'].forEach(id => document.getElementById(id).value = '');
+  chroniclePage = 1; loadChronicle();
+}
+function changeChroniclePage(delta) {
+  chroniclePage = Math.max(1, chroniclePage + delta);
+  loadChronicle();
+}
+
+function showChronicleDetail(index) {
+  const e = chronicleCurrentRows[index];
+  if (!e) return;
+  const modal = document.createElement('div');
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+  const detailsPretty = JSON.stringify(e.details || {}, null, 2);
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:700px;width:100%;max-height:90vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="this.closest('[style*=fixed]').remove()"
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+        <div style="font-size:11px;letter-spacing:3px;color:var(--cyan)">📜 CHRONICLE — ENTRÉE #${chronicleEscape(e.seq)}</div>
+        ${chronicleResultBadge(e.result)}
+      </div>
+
+      <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px;margin-bottom:16px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:12px;color:var(--text-dim);margin-bottom:12px">
+          <div><strong style="color:var(--text)">Acteur</strong><br>${chronicleActorBadge(e.actor_type, e.actor_id)}</div>
+          <div><strong style="color:var(--text)">Action</strong><br><span style="font-family:var(--font-mono)">${chronicleEscape(e.action)}</span></div>
+          <div><strong style="color:var(--text)">Ressource</strong><br>${chronicleEscape(e.resource_type || '—')} ${e.resource_id ? `(${chronicleEscape(e.resource_id)})` : ''}</div>
+          <div><strong style="color:var(--text)">Client</strong><br>${chronicleEscape(e.tenant_name || '—')}</div>
+          <div><strong style="color:var(--text)">Horodatage</strong><br>${new Date(e.timestamp).toLocaleString('fr-FR')}</div>
+        </div>
+        <p style="color:var(--text-bright);font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word;font-family:var(--font-mono);background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:10px">${chronicleEscape(detailsPretty)}</p>
+      </div>
+
+      <div style="font-size:10px;color:var(--text-dim);letter-spacing:.04em;margin-bottom:6px">CHAÎNE DE HASH</div>
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);word-break:break-all;background:var(--elevated);border:1px solid var(--line);border-radius:4px;padding:10px;margin-bottom:16px">
+        previous_hash: ${chronicleEscape(e.previous_hash)}<br>
+        entry_hash: ${chronicleEscape(e.entry_hash)}
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;border-top:1px solid var(--line);padding-top:16px">
+        <button onclick="this.closest('[style*=fixed]').remove()"
+          style="background:var(--cyan-dim);color:var(--cyan);border:1px solid var(--cyan);
+                 padding:8px 20px;border-radius:4px;cursor:pointer;font-size:13px">
+          Fermer
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+async function exportChronicle() {
+  showToast('⏳ Génération de l\'export CHRONICLE...');
+  try {
+    const res = await fetch(`${API}/chronicle/export?${chronicleQueryParams()}`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    if (!res.ok) { showToast('❌ Erreur export CHRONICLE'); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `chronicle-export-${Date.now()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast('✅ Export CHRONICLE téléchargé');
+  } catch (e) {
+    showToast('❌ Erreur export: ' + e.message);
+  }
 }
 
 // ════════════════════════════════════════════
