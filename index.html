@@ -685,6 +685,7 @@ select.form-input option{background:var(--surface)}
       <div class="tb-btn" onclick="nav('reports')" data-page="reports"><span class="tb-icon">▦</span><span>Rapports</span></div>
       <div class="tb-btn" onclick="nav('services')" data-page="services"><span class="tb-icon">◈</span><span>Services</span></div>
       <div class="tb-btn" onclick="nav('commande')" data-page="commande"><span class="tb-icon">◇</span><span>Commander</span></div>
+      <div class="tb-btn" onclick="nav('augur')" data-page="augur"><span class="tb-icon">🔮</span><span>AUGUR</span></div>
       <div class="tb-btn" onclick="nav('ai')" data-page="ai"><span class="tb-icon">⬡</span><span>ARIA IA</span></div>
     </nav>
     <div class="tb-right">
@@ -1107,6 +1108,63 @@ select.form-input option{background:var(--surface)}
       </div>
     </div>
 
+    <!-- ══ AUGUR ══ -->
+    <div class="page" id="page-augur">
+      <div class="section-header">
+        <div><div class="section-title">AUGUR — Qualification des prospects</div><div class="section-sub">Entretien de découverte structuré · Recommandation de déploiement automatisée · Pôle HERMES</div></div>
+        <button class="action-btn primary" id="augur-new-btn" onclick="openAugurNewModal()">+ Nouvelle session</button>
+      </div>
+
+      <div id="augur-list-view">
+        <div class="card">
+          <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Sessions de découverte</div>
+          <div class="table-wrap"><table class="data-table" id="augur-table">
+            <thead><tr><th>Session</th><th>Prospect</th><th>Entreprise</th><th>Secteur</th><th>Statut</th><th>Date</th><th></th></tr></thead>
+            <tbody id="augur-tbody"><tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div id="augur-session-view" style="display:none">
+        <div style="margin-bottom:14px">
+          <button class="action-btn" onclick="backToAugurList()">‹ Retour aux sessions</button>
+        </div>
+        <div class="chat-wrapper">
+          <div class="chat-main">
+            <div class="chat-header">
+              <div class="aria-avatar">🔮</div>
+              <div>
+                <div class="aria-name" id="augur-session-title">—</div>
+                <div class="aria-status"><span id="augur-session-id" style="font-family:var(--font-mono)"></span> · <span id="augur-session-status"></span></div>
+              </div>
+            </div>
+            <div class="chat-messages" id="augur-chat-messages"></div>
+            <div class="chat-input-area">
+              <textarea class="chat-input" id="augur-chat-input" placeholder="Réponse du prospect..." onkeydown="handleAugurKey(event)"></textarea>
+              <button class="send-btn" id="augur-send-btn" onclick="sendAugurAnswer()">►</button>
+            </div>
+          </div>
+          <div class="chat-sidebar">
+            <div class="aria-card">
+              <div class="aria-title">Progression</div>
+              <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim);margin-bottom:8px" id="augur-progress-text">Question 1 / 10</div>
+              <div class="stat-bar"><div class="stat-bar-fill" style="background:linear-gradient(90deg,var(--cyan),#00ddff);width:0%" id="augur-progress-fill"></div></div>
+            </div>
+            <div class="aria-card">
+              <div class="aria-title">Fiche prospect</div>
+              <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);line-height:2">
+                Email : <span id="augur-prospect-email" style="color:var(--text)">—</span><br>
+                Secteur : <span id="augur-prospect-sector" style="color:var(--text)">—</span><br>
+                Créée le : <span id="augur-prospect-created" style="color:var(--text)">—</span>
+              </div>
+            </div>
+            <button class="action-btn primary" id="augur-finalize-btn" style="display:none;width:100%" onclick="finalizeAugurSession()">🎯 Finaliser et générer la recommandation</button>
+            <button class="action-btn primary" id="augur-view-reco-btn" style="display:none;width:100%" onclick="openAugurRecommendationModal()">📄 Voir la recommandation</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ══ AI CHAT ══ -->
     <div class="page" id="page-ai">
       <div class="section-header">
@@ -1322,6 +1380,7 @@ function nav(page) {
   if (page === 'usecases') loadUseCases();
   if (page === 'playbooks') loadPlaybooks();
   if (page === 'chronicle') loadChronicle();
+  if (page === 'augur') loadAugur();
 }
 
 // ════════════════════════════════════════════
@@ -3075,6 +3134,421 @@ function showTyping() {
 function hideTyping() { if(typingEl){typingEl.remove();typingEl=null;} }
 function handleKey(e) { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();} }
 function sendQuick(q) { document.getElementById('chat-input').value=q; sendMessage(); }
+
+// ════════════════════════════════════════════
+// AUGUR — Qualification des prospects (Pôle HERMES)
+// ════════════════════════════════════════════
+let augurSessions = [];
+let augurCurrentSession = null;
+let augurCurrentRecommendation = null;
+
+// Comme apiCall, mais préserve le message d'erreur serveur (utile pour les
+// validations métier AUGUR : "questionnaire incomplet", etc.)
+async function apiCallEx(path, options = {}) {
+  const headers = { 'Content-Type':'application/json', ...options.headers };
+  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+  try {
+    const res = await fetch(`${API}${path}`, { ...options, headers });
+    if (res.status === 401) { logout(); return { ok:false, error:'Session expirée' }; }
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, data, error: data?.error };
+  } catch (e) {
+    return { ok:false, error:'Erreur réseau' };
+  }
+}
+
+async function loadAugur() {
+  showAugurListView();
+  await refreshAugurSessionsList();
+}
+
+async function refreshAugurSessionsList() {
+  const res = await apiCall('/agents/augur/sessions');
+  augurSessions = res?.data || [];
+  renderAugurSessionsTable();
+}
+
+function augurStatusBadge(status) {
+  const cfg = {
+    in_progress: { color: 'var(--amber)', bg: 'var(--amber-dim)', label: 'En cours' },
+    completed: { color: 'var(--green)', bg: 'var(--green-dim)', label: 'Terminée' },
+    archived: { color: 'var(--text-dim)', bg: 'rgba(100,100,100,.15)', label: 'Archivée' },
+  }[status] || { color: 'var(--text-dim)', bg: 'rgba(100,100,100,.15)', label: status };
+  return `<span style="background:${cfg.bg};color:${cfg.color};border:1px solid ${cfg.color};
+    border-radius:4px;padding:2px 8px;font-size:10px;font-family:var(--font-mono);text-transform:uppercase">${cfg.label}</span>`;
+}
+
+function renderAugurSessionsTable() {
+  const tbody = document.getElementById('augur-tbody');
+  if (!augurSessions.length) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune session de découverte pour le moment</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  augurSessions.forEach(s => {
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.onclick = () => openAugurSession(s.id);
+    const date = new Date(s.created_at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+    tr.innerHTML = `
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--cyan)">${escHtml(s.session_id)}</td>
+      <td>${escHtml(s.prospect_name || '—')}</td>
+      <td>${escHtml(s.prospect_company || '—')}</td>
+      <td>${escHtml(s.prospect_sector || '—')}</td>
+      <td>${augurStatusBadge(s.status)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${date}</td>
+      <td><button class="icon-btn" onclick="event.stopPropagation();openAugurSession('${s.id}')" title="Ouvrir">→</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function showAugurListView() {
+  document.getElementById('augur-list-view').style.display = 'block';
+  document.getElementById('augur-session-view').style.display = 'none';
+  document.getElementById('augur-new-btn').style.display = 'inline-flex';
+}
+
+function showAugurSessionView() {
+  document.getElementById('augur-list-view').style.display = 'none';
+  document.getElementById('augur-session-view').style.display = 'block';
+  document.getElementById('augur-new-btn').style.display = 'none';
+}
+
+function backToAugurList() {
+  augurCurrentSession = null;
+  augurCurrentRecommendation = null;
+  showAugurListView();
+  refreshAugurSessionsList();
+}
+
+// ── Nouvelle session ──────────────────────────────────────────────────────
+function openAugurNewModal() {
+  const modal = document.createElement('div');
+  modal.id = 'augur-new-overlay';
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:520px;width:100%;padding:32px;position:relative">
+      <button onclick="closeAugurNewModal()"
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:24px">NOUVELLE SESSION DE DÉCOUVERTE</div>
+      <div class="form-group"><label class="form-label">Nom du prospect *</label>
+        <input class="form-input" id="augur-new-name" placeholder="Prénom Nom"/></div>
+      <div class="form-group"><label class="form-label">Email</label>
+        <input class="form-input" id="augur-new-email" type="email" placeholder="prospect@entreprise.ma"/></div>
+      <div class="form-group"><label class="form-label">Entreprise</label>
+        <input class="form-input" id="augur-new-company" placeholder="Nom de l'entreprise"/></div>
+      <div class="form-group"><label class="form-label">Secteur</label>
+        <input class="form-input" id="augur-new-sector" placeholder="Ex: Finance, Santé, Industrie..."/></div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:20px;margin-top:8px">
+        <button class="action-btn" onclick="closeAugurNewModal()">Annuler</button>
+        <button class="action-btn primary" id="augur-new-save-btn" onclick="createAugurSession()">Démarrer la session</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  document.getElementById('augur-new-name').focus();
+}
+
+function closeAugurNewModal() {
+  document.getElementById('augur-new-overlay')?.remove();
+}
+
+async function createAugurSession() {
+  const name = document.getElementById('augur-new-name').value.trim();
+  if (name.length < 2) { showToast('⚠ Le nom du prospect doit contenir au moins 2 caractères'); return; }
+
+  const btn = document.getElementById('augur-new-save-btn');
+  btn.disabled = true; btn.textContent = 'Création...';
+
+  const body = {
+    prospectName: name,
+    prospectEmail: document.getElementById('augur-new-email').value.trim() || null,
+    prospectCompany: document.getElementById('augur-new-company').value.trim() || null,
+    prospectSector: document.getElementById('augur-new-sector').value.trim() || null,
+  };
+  const res = await apiCallEx('/agents/augur/sessions', { method:'POST', body: JSON.stringify(body) });
+
+  if (!res.ok) {
+    showToast('⚠ ' + (res.error || 'Erreur lors de la création de la session'));
+    btn.disabled = false; btn.textContent = 'Démarrer la session';
+    return;
+  }
+
+  closeAugurNewModal();
+  showToast(`✓ Session ${res.data.data.session_id} créée`);
+  await refreshAugurSessionsList();
+  openAugurSession(res.data.data.id);
+}
+
+// ── Session en cours — chat de découverte ────────────────────────────────
+async function openAugurSession(id) {
+  const res = await apiCall(`/agents/augur/sessions/${id}`);
+  if (!res?.data) { showToast('⚠ Session introuvable'); return; }
+  augurCurrentSession = res.data;
+  augurCurrentRecommendation = null;
+  showAugurSessionView();
+  renderAugurSession();
+}
+
+function renderAugurSession() {
+  const s = augurCurrentSession;
+  if (!s) return;
+
+  document.getElementById('augur-session-title').textContent = `${s.prospect_name}${s.prospect_company ? ' — ' + s.prospect_company : ''}`;
+  document.getElementById('augur-session-id').textContent = s.session_id;
+  document.getElementById('augur-session-status').innerHTML = augurStatusBadge(s.status);
+  document.getElementById('augur-prospect-email').textContent = s.prospect_email || '—';
+  document.getElementById('augur-prospect-sector').textContent = s.prospect_sector || '—';
+  document.getElementById('augur-prospect-created').textContent = new Date(s.created_at).toLocaleDateString('fr-FR');
+
+  const conv = s.conversation || [];
+  const answered = conv.filter(m => m.role === 'user').length;
+  const total = 10;
+  document.getElementById('augur-progress-text').textContent = `Question ${Math.min(answered + 1, total)} / ${total}`;
+  document.getElementById('augur-progress-fill').style.width = `${Math.min(100, Math.round((answered / total) * 100))}%`;
+
+  renderAugurChat(conv);
+
+  const input = document.getElementById('augur-chat-input');
+  const sendBtn = document.getElementById('augur-send-btn');
+  const finalizeBtn = document.getElementById('augur-finalize-btn');
+  const viewRecoBtn = document.getElementById('augur-view-reco-btn');
+
+  if (s.status === 'completed') {
+    input.disabled = true; sendBtn.disabled = true;
+    input.placeholder = 'Session terminée';
+    finalizeBtn.style.display = 'none';
+    viewRecoBtn.style.display = 'block';
+  } else {
+    input.disabled = false; sendBtn.disabled = false;
+    input.placeholder = 'Réponse du prospect...';
+    finalizeBtn.style.display = answered >= total ? 'block' : 'none';
+    viewRecoBtn.style.display = 'none';
+  }
+}
+
+function renderAugurChat(conversation) {
+  const msgs = document.getElementById('augur-chat-messages');
+  msgs.innerHTML = '';
+  conversation.forEach(m => {
+    const el = document.createElement('div');
+    el.className = `msg ${m.role === 'assistant' ? 'ai' : 'user'}`;
+    const time = m.timestamp ? new Date(m.timestamp).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }) : '';
+    el.innerHTML = `<div class="msg-bubble">${escHtml(m.content).replace(/\n/g,'<br>')}</div><div class="msg-time">${m.role === 'assistant' ? 'AUGUR' : 'Prospect'} · ${time}</div>`;
+    msgs.appendChild(el);
+  });
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function handleAugurKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAugurAnswer(); } }
+
+async function sendAugurAnswer() {
+  const input = document.getElementById('augur-chat-input');
+  const msg = input.value.trim();
+  if (!msg || !augurCurrentSession) return;
+  input.value = '';
+
+  const btn = document.getElementById('augur-send-btn');
+  btn.disabled = true;
+
+  const res = await apiCallEx(`/agents/augur/sessions/${augurCurrentSession.id}/message`, {
+    method:'POST', body: JSON.stringify({ message: msg })
+  });
+
+  if (!res.ok) {
+    showToast('⚠ ' + (res.error || "Erreur lors de l'envoi de la réponse"));
+    input.value = msg;
+    btn.disabled = false;
+    return;
+  }
+
+  augurCurrentSession.conversation = res.data.data.session.conversation;
+  renderAugurSession();
+  btn.disabled = false;
+  input.focus();
+}
+
+async function finalizeAugurSession() {
+  if (!augurCurrentSession) return;
+  const btn = document.getElementById('augur-finalize-btn');
+  btn.disabled = true; btn.textContent = 'Génération en cours...';
+
+  const res = await apiCallEx(`/agents/augur/sessions/${augurCurrentSession.id}/complete`, { method:'POST' });
+
+  btn.disabled = false; btn.textContent = '🎯 Finaliser et générer la recommandation';
+
+  if (!res.ok) {
+    showToast('⚠ ' + (res.error || 'Erreur lors de la génération de la recommandation'));
+    return;
+  }
+
+  augurCurrentSession = res.data.data.session;
+  augurCurrentRecommendation = res.data.data.recommendation;
+  renderAugurSession();
+  refreshAugurSessionsList();
+  showToast('✓ Recommandation générée avec succès');
+  openAugurRecommendationModal();
+}
+
+// ── Modal recommandation ──────────────────────────────────────────────────
+async function openAugurRecommendationModal() {
+  if (!augurCurrentSession) return;
+  let reco = augurCurrentRecommendation;
+  if (!reco) {
+    const res = await apiCall(`/agents/augur/sessions/${augurCurrentSession.id}/recommendation`);
+    if (!res?.data) { showToast('⚠ Aucune recommandation disponible'); return; }
+    reco = res.data;
+    augurCurrentRecommendation = reco;
+  }
+  renderAugurRecommendationModal(reco);
+}
+
+function augurFormatPrice(price) {
+  if (!price) return '—';
+  if (price.monthly) return `${Number(price.monthly).toLocaleString('fr-FR')} MAD/mois`;
+  if (price.min && price.max) return `${Number(price.min).toLocaleString('fr-FR')} – ${Number(price.max).toLocaleString('fr-FR')} MAD`;
+  return price.notes || price.pack || '—';
+}
+
+function renderAugurRecommendationModal(reco) {
+  const s = augurCurrentSession;
+  const na = s.needs_assessment || {};
+  const modules = reco.modules || [];
+  const price = reco.estimated_price_mad || {};
+  const actions = reco.priority_actions || [];
+  const gaps = reco.compliance_gaps || [];
+
+  const deploymentLabel = { cloud:'☁ Cloud', hybrid:'⇄ Hybride', on_premise:'🏢 On-Premise' }[reco.deployment_model] || (reco.deployment_model || '—');
+  const riskCfg = {
+    low: { c:'var(--green)', l:'Faible' },
+    medium: { c:'#ff8800', l:'Modéré' },
+    high: { c:'var(--amber)', l:'Élevé' },
+    critical: { c:'var(--red)', l:'Critique' },
+  }[reco.risk_level] || { c:'var(--text-dim)', l: reco.risk_level || '—' };
+
+  const modal = document.createElement('div');
+  modal.id = 'augur-reco-overlay';
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:820px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="closeAugurRecommendationModal()"
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:8px">RECOMMANDATION AUGUR</div>
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px">${escHtml(s.prospect_name)}${s.prospect_company ? ' — ' + escHtml(s.prospect_company) : ''}</div>
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-bottom:24px">${escHtml(s.session_id)}</div>
+
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px">
+        <div class="card" style="padding:16px"><div class="stat-label-top">Modèle de déploiement</div><div style="font-size:16px;font-weight:700;margin-top:6px">${deploymentLabel}</div></div>
+        <div class="card" style="padding:16px"><div class="stat-label-top">Niveau de risque</div><div style="font-size:16px;font-weight:700;margin-top:6px;color:${riskCfg.c}">${riskCfg.l}</div></div>
+        <div class="card" style="padding:16px"><div class="stat-label-top">Estimation tarifaire</div><div style="font-size:15px;font-weight:700;margin-top:6px">${augurFormatPrice(price)}</div></div>
+      </div>
+
+      ${na.summary ? `<div style="font-size:13px;color:var(--text-dim);margin-bottom:20px;line-height:1.6;padding:12px 14px;background:var(--elevated);border-radius:6px">${escHtml(na.summary)}</div>` : ''}
+
+      <div class="card-title" style="margin-bottom:10px"><span class="dot" style="background:var(--cyan)"></span>Modules recommandés</div>
+      <div style="margin-bottom:20px">
+        ${modules.map(m => `<div style="border:1px solid var(--line2);border-radius:6px;padding:12px 14px;margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+            <div style="font-weight:700;font-size:13px">${escHtml(m.name)}</div>
+            <span style="font-size:10px;font-family:var(--font-mono);text-transform:uppercase;color:var(--cyan);white-space:nowrap">${escHtml(m.priority || '')}</span>
+          </div>
+          <div style="font-size:12px;color:var(--text-dim);margin-top:4px">${escHtml(m.justification || m.description || '')}</div>
+        </div>`).join('') || '<div style="color:var(--text-dim);font-size:12px">Aucun module suggéré</div>'}
+      </div>
+
+      <div class="card-title" style="margin-bottom:10px"><span class="dot" style="background:var(--amber)"></span>Actions prioritaires</div>
+      <div style="margin-bottom:20px">
+        ${actions.map(a => `<div style="display:flex;gap:10px;margin-bottom:8px;font-size:12px">
+          <span style="color:var(--amber);font-family:var(--font-mono);white-space:nowrap">${escHtml(a.timeline || '')}</span>
+          <span>${escHtml(a.action)}${a.reason ? ` — <span style="color:var(--text-dim)">${escHtml(a.reason)}</span>` : ''}</span>
+        </div>`).join('') || '<div style="color:var(--text-dim);font-size:12px">Aucune action prioritaire</div>'}
+      </div>
+
+      <div class="card-title" style="margin-bottom:10px"><span class="dot" style="background:var(--red)"></span>Écarts de conformité</div>
+      <div style="margin-bottom:24px">
+        ${gaps.map(g => `<div style="font-size:12px;margin-bottom:8px"><strong>${escHtml(g.framework)}</strong> — ${escHtml(g.gap)}<br><span style="color:var(--text-dim)">→ ${escHtml(g.recommendation)}</span></div>`).join('') || '<div style="color:var(--text-dim);font-size:12px">Aucun écart identifié</div>'}
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:20px">
+        <button class="action-btn" onclick="closeAugurRecommendationModal()">Fermer</button>
+        <button class="action-btn primary" onclick="exportAugurRecommendation()">⬇ Exporter en PDF</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+function closeAugurRecommendationModal() {
+  document.getElementById('augur-reco-overlay')?.remove();
+}
+
+function exportAugurRecommendation() {
+  const s = augurCurrentSession;
+  const reco = augurCurrentRecommendation;
+  if (!s || !reco) return;
+  const na = s.needs_assessment || {};
+
+  const lines = [];
+  lines.push('═'.repeat(60));
+  lines.push('SORE SECURITY — RECOMMANDATION AUGUR');
+  lines.push('═'.repeat(60));
+  lines.push('');
+  lines.push(`Session : ${s.session_id}`);
+  lines.push(`Prospect : ${s.prospect_name}${s.prospect_company ? ' — ' + s.prospect_company : ''}`);
+  lines.push(`Secteur : ${s.prospect_sector || 'N/C'}`);
+  lines.push(`Date : ${new Date(s.updated_at || s.created_at).toLocaleDateString('fr-FR')}`);
+  lines.push('');
+  lines.push('── FICHE DE BESOIN ──');
+  if (na.summary) { lines.push(na.summary); lines.push(''); }
+  lines.push(`Maturité sécurité : ${na.securityMaturity || 'N/C'}`);
+  lines.push(`Réglementations applicables : ${(na.applicableRegulations || []).join(', ') || 'N/C'}`);
+  lines.push(`Sensibilité des données : ${(na.dataSensitivity || []).join(', ') || 'N/C'}`);
+  lines.push(`Infrastructure : ${na.infrastructure || 'N/C'}`);
+  lines.push(`Urgence : ${na.urgency || 'N/C'}`);
+  lines.push('');
+  lines.push('── RECOMMANDATION ──');
+  lines.push(`Modèle de déploiement : ${reco.deployment_model}`);
+  lines.push(`Niveau de risque : ${reco.risk_level}`);
+  lines.push(`Estimation tarifaire : ${augurFormatPrice(reco.estimated_price_mad)}`);
+  lines.push('');
+  lines.push('Modules recommandés :');
+  (reco.modules || []).forEach(m => lines.push(`  • ${m.name} [${m.priority || ''}] — ${m.justification || m.description || ''}`));
+  lines.push('');
+  lines.push('Actions prioritaires :');
+  (reco.priority_actions || []).forEach(a => lines.push(`  • [${a.timeline || ''}] ${a.action} — ${a.reason || ''}`));
+  lines.push('');
+  lines.push('Écarts de conformité :');
+  (reco.compliance_gaps || []).forEach(g => lines.push(`  • ${g.framework} : ${g.gap} → ${g.recommendation}`));
+  lines.push('');
+  lines.push('═'.repeat(60));
+  lines.push('Sore Security — Casablanca, Maroc — contact@sore-security.com — +212 616 455 759');
+
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `recommandation-${s.session_id}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showToast('⬇ Recommandation exportée');
+}
 
 // ════════════════════════════════════════════
 // COMMANDE
