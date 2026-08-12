@@ -679,6 +679,7 @@ select.form-input option{background:var(--surface)}
       <div class="tb-btn active" onclick="nav('dashboard')" data-page="dashboard"><span class="tb-icon">⬡</span><span>War Room</span></div>
       <div class="tb-btn" onclick="nav('soc')" data-page="soc"><span class="tb-icon">◉</span><span>SOC</span></div>
       <div class="tb-btn" onclick="nav('logs')" data-page="logs"><span class="tb-icon">▤</span><span>Logs</span></div>
+      <div class="tb-btn" onclick="nav('threatintel')" data-page="threatintel"><span class="tb-icon">🛰</span><span>Threat Intel</span></div>
       <div class="tb-btn" onclick="nav('usecases')" data-page="usecases"><span class="tb-icon">⚙</span><span>Use Cases</span></div>
       <div class="tb-btn" onclick="nav('playbooks')" data-page="playbooks"><span class="tb-icon">🎭</span><span>Playbooks</span></div>
       <div class="tb-btn" onclick="nav('chronicle')" data-page="chronicle"><span class="tb-icon">📜</span><span>Chronicle</span></div>
@@ -918,6 +919,77 @@ select.form-input option{background:var(--surface)}
             <div class="card-title"><span class="dot" style="background:var(--red)"></span>Top use cases (24h)</div>
             <div id="logs-top-usecases"></div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ THREAT INTEL (MISP) ══ -->
+    <div class="page" id="page-threatintel">
+      <div class="section-header">
+        <div><div class="section-title">Threat Intelligence — MISP</div><div class="section-sub" id="ti-sub">Feeds publics (Feodo Tracker, URLhaus, MalwareBazaar, CIRCL OSINT) · Pôle LEXIS</div></div>
+        <button class="action-btn primary" id="ti-sync-btn" onclick="syncThreatIntel()">🔄 Synchroniser maintenant</button>
+      </div>
+
+      <div class="stats-grid" id="ti-stats-grid">
+        <div class="stat-card cyan">
+          <div class="stat-label-top">IOC actifs</div>
+          <div class="stat-val cyan" id="ti-stat-total">—</div>
+          <div class="stat-sub">toutes sources confondues</div>
+        </div>
+        <div class="stat-card red">
+          <div class="stat-label-top">Matches — 24h</div>
+          <div class="stat-val red" id="ti-stat-matches24h">—</div>
+          <div class="stat-sub">sur les logs ingérés</div>
+        </div>
+        <div class="stat-card amber">
+          <div class="stat-label-top">Par type</div>
+          <div id="ti-stat-bytype" style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-top:8px">—</div>
+        </div>
+        <div class="stat-card green">
+          <div class="stat-label-top">Par source</div>
+          <div id="ti-stat-bysource" style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-top:8px">—</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Lookup manuel</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="flex:1;min-width:220px;margin-bottom:0">
+            <label class="form-label">Valeur (IP, domaine, URL, hash, email)</label>
+            <input class="form-input" id="ti-lookup-value" placeholder="Ex: 185.234.10.10" onkeydown="if(event.key==='Enter')lookupThreatIntel()"/>
+          </div>
+          <div class="form-group" style="min-width:160px;margin-bottom:0">
+            <label class="form-label">Type (optionnel)</label>
+            <select class="form-input" id="ti-lookup-type">
+              <option value="">Auto</option>
+              <option value="ip">ip</option>
+              <option value="domain">domain</option>
+              <option value="url">url</option>
+              <option value="hash_md5">hash_md5</option>
+              <option value="hash_sha256">hash_sha256</option>
+              <option value="email">email</option>
+              <option value="filename">filename</option>
+            </select>
+          </div>
+          <button class="action-btn primary" onclick="lookupThreatIntel()">🔍 Rechercher</button>
+        </div>
+        <div id="ti-lookup-result" style="margin-top:16px"></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title"><span class="dot" style="background:var(--amber)"></span>Derniers IOC ajoutés</div>
+          <div class="table-wrap"><table class="data-table" id="ti-indicators-table">
+            <thead><tr><th>Type</th><th>Valeur</th><th>Menace</th><th>Sévérité</th><th>Source</th><th>Ajouté</th></tr></thead>
+            <tbody id="ti-indicators-tbody"><tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+          </table></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="dot" style="background:var(--red)"></span>Derniers matches sur vos logs</div>
+          <div class="table-wrap"><table class="data-table" id="ti-matches-table">
+            <thead><tr><th>Détecté</th><th>Type</th><th>Valeur</th><th>Menace</th><th>Log</th></tr></thead>
+            <tbody id="ti-matches-tbody"><tr><td colspan="5" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+          </table></div>
         </div>
       </div>
     </div>
@@ -1381,6 +1453,7 @@ function nav(page) {
   if (page === 'playbooks') loadPlaybooks();
   if (page === 'chronicle') loadChronicle();
   if (page === 'augur') loadAugur();
+  if (page === 'threatintel') loadThreatIntel();
 }
 
 // ════════════════════════════════════════════
@@ -1539,11 +1612,18 @@ function renderLogsTable(res) {
            style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:6px;cursor:pointer;vertical-align:middle;
                   background:${oracleData.abuseScore > 70 ? 'var(--red)' : oracleData.abuseScore >= 20 ? 'var(--amber)' : 'var(--green)'}"></span>`
       : '';
+    const iocData = log.normalized?.ioc_match;
+    const iocBadge = iocData
+      ? `<span onclick="event.stopPropagation();showLogDetail(${i})" title="IOC Match — ${iocData.threatType || 'menace'} · ${iocData.source}"
+           style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;cursor:pointer;vertical-align:middle;
+                  background:var(--red-dim);color:var(--red);border:1px solid var(--red);border-radius:4px;
+                  padding:1px 6px;font-size:9px;font-family:var(--font-mono);font-weight:700">🛰 IOC</span>`
+      : '';
     tr.innerHTML = `
       <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);white-space:nowrap">${time}</td>
       <td style="font-family:var(--font-mono);font-size:11px">${log.source || '—'}</td>
       <td style="font-family:var(--font-mono);font-size:11px">${log.host || '—'}</td>
-      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${log.ip_address || '—'}${oracleBadge}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${log.ip_address || '—'}${oracleBadge}${iocBadge}</td>
       <td style="font-family:var(--font-mono);font-size:11px">${log.log_type || '—'}</td>
       <td><span class="sev-badge ${log.severity || 'info'}">${(log.severity || 'info').toUpperCase()}</span></td>
       <td style="font-family:var(--font-mono);font-size:11px;color:${log.use_case_matched ? 'var(--red)' : 'var(--text-dim)'}">${log.use_case_matched || '—'}</td>
@@ -1657,6 +1737,23 @@ function showLogDetail(index) {
       </div>
       `; })() : ''}
 
+      ${log.normalized?.ioc_match ? (() => { const m = log.normalized.ioc_match; return `
+      <div style="background:var(--red-dim);border:1px solid var(--red);border-radius:6px;padding:16px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <div style="font-size:11px;color:var(--red);letter-spacing:2px">🛰 IOC MATCH (MISP)</div>
+          <span style="margin-left:auto"><span class="sev-badge ${m.severity}">${(m.severity||'').toUpperCase()}</span></span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;color:var(--text-dim);margin-bottom:10px">
+          <div>Type de menace : <span style="color:var(--text)">${m.threatType || '—'}</span></div>
+          <div>Confiance : <span style="color:var(--text)">${m.confidence ?? '—'}/100</span></div>
+          <div>Source : <span style="color:var(--text)">${m.source || '—'}</span></div>
+          <div>Événement MISP : <span style="color:var(--text)">${m.mispEventId || '—'}</span></div>
+        </div>
+        ${m.mispEventInfo ? `<div style="font-size:12px;color:var(--text-bright);margin-bottom:10px">${escHtml(m.mispEventInfo)}</div>` : ''}
+        ${(m.tags || []).length ? `<div style="display:flex;flex-wrap:wrap;gap:6px">${m.tags.map(t => `<span style="background:var(--surface);border:1px solid var(--line);color:var(--text-dim);padding:2px 8px;border-radius:4px;font-size:10px;font-family:monospace">${escHtml(t)}</span>`).join('')}</div>` : ''}
+      </div>
+      `; })() : ''}
+
       <div style="margin-bottom:8px">
         <div style="font-size:11px;color:var(--cyan);letter-spacing:2px;margin-bottom:10px">CHAMPS NORMALISÉS</div>
         <pre style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px;
@@ -1665,6 +1762,138 @@ function showLogDetail(index) {
     </div>
   `;
   document.body.appendChild(modal);
+}
+
+// ════════════════════════════════════════════
+// THREAT INTEL (MISP) — Pôle LEXIS
+// ════════════════════════════════════════════
+let tiIndicators = [];
+let tiMatches = [];
+
+async function loadThreatIntel() {
+  document.getElementById('ti-sub').textContent =
+    `Feeds publics (Feodo Tracker, URLhaus, MalwareBazaar, CIRCL OSINT) · Pôle LEXIS · actualisé ${new Date().toLocaleTimeString('fr-FR')}`;
+
+  const [statsRes, indicatorsRes, matchesRes] = await Promise.all([
+    apiCall('/ioc/stats'),
+    apiCall('/ioc/indicators?limit=20'),
+    apiCall('/ioc/matches?limit=20'),
+  ]);
+
+  renderTiStats(statsRes?.data);
+  tiIndicators = indicatorsRes?.data || [];
+  renderTiIndicators(tiIndicators);
+  tiMatches = matchesRes?.data || [];
+  renderTiMatches(tiMatches);
+}
+
+function renderTiStats(stats) {
+  document.getElementById('ti-stat-total').textContent = stats?.totalActive ?? '—';
+  document.getElementById('ti-stat-matches24h').textContent = stats?.matches24h ?? '—';
+
+  const byTypeEl = document.getElementById('ti-stat-bytype');
+  const byType = stats?.byType || [];
+  byTypeEl.innerHTML = byType.length
+    ? byType.map(t => `${escHtml(t.type)} : <span style="color:var(--text)">${t.count}</span>`).join('<br>')
+    : 'Aucune donnée';
+
+  const bySourceEl = document.getElementById('ti-stat-bysource');
+  const bySource = stats?.bySource || [];
+  bySourceEl.innerHTML = bySource.length
+    ? bySource.map(s => `${escHtml(s.source)} : <span style="color:var(--text)">${s.count}</span>`).join('<br>')
+    : 'Aucune donnée';
+}
+
+function renderTiIndicators(rows) {
+  const tbody = document.getElementById('ti-indicators-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun IOC actif — lancez une synchronisation</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  rows.forEach(ioc => {
+    const tr = document.createElement('tr');
+    const date = new Date(ioc.created_at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+    tr.innerHTML = `
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(ioc.ioc_type)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(ioc.value)}">${escHtml(ioc.value)}</td>
+      <td style="font-size:12px;color:var(--text-dim)">${escHtml(ioc.threat_type || '—')}</td>
+      <td><span class="sev-badge ${ioc.severity || 'info'}">${(ioc.severity || 'info').toUpperCase()}</span></td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--cyan)">${escHtml(ioc.source)}</td>
+      <td style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);white-space:nowrap">${date}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderTiMatches(rows) {
+  const tbody = document.getElementById('ti-matches-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun match récent</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  rows.forEach(m => {
+    const tr = document.createElement('tr');
+    const date = new Date(m.matched_at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+    tr.innerHTML = `
+      <td style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);white-space:nowrap">${date}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(m.ioc_type)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(m.value)}">${escHtml(m.value)}</td>
+      <td style="font-size:12px;color:var(--text-dim)">${escHtml(m.threat_type || '—')}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(m.log_ip_address || m.log_host || '—')}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function syncThreatIntel() {
+  const btn = document.getElementById('ti-sync-btn');
+  btn.disabled = true; btn.textContent = '⏳ Synchronisation...';
+
+  const res = await apiCallEx('/ioc/sync', { method: 'POST' });
+
+  btn.disabled = false; btn.textContent = '🔄 Synchroniser maintenant';
+
+  if (!res.ok) { showToast('⚠ ' + (res.error || 'Erreur de synchronisation')); return; }
+
+  const r = res.data.results;
+  showToast(`✓ Sync terminée — feodotracker:${r.feodotracker} urlhaus:${r.urlhaus} malwarebazaar:${r.malwarebazaar} osint:${r.osint}`);
+  loadThreatIntel();
+}
+
+async function lookupThreatIntel() {
+  const value = document.getElementById('ti-lookup-value').value.trim();
+  const type = document.getElementById('ti-lookup-type').value;
+  const resultEl = document.getElementById('ti-lookup-result');
+  if (!value) { showToast('⚠ Entrez une valeur à rechercher'); return; }
+
+  resultEl.innerHTML = `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Recherche...</div>`;
+
+  const res = await apiCallEx(`/ioc/lookup?value=${encodeURIComponent(value)}${type ? '&type=' + encodeURIComponent(type) : ''}`);
+
+  if (!res.ok) { resultEl.innerHTML = `<div style="color:var(--red);font-size:12px">⚠ ${escHtml(res.error || 'Erreur de recherche')}</div>`; return; }
+
+  const hit = res.data.data;
+  if (!hit) {
+    resultEl.innerHTML = `<div style="background:var(--green-dim);border:1px solid var(--green);border-radius:6px;padding:14px;color:var(--green);font-size:13px">✓ Aucun IOC connu pour <strong>${escHtml(value)}</strong> — pas de menace référencée.</div>`;
+    return;
+  }
+
+  resultEl.innerHTML = `
+    <div style="background:var(--red-dim);border:1px solid var(--red);border-radius:6px;padding:16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <span style="color:var(--red);font-weight:700;font-size:13px">⚠ IOC CONNU</span>
+        <span class="sev-badge ${hit.severity}">${(hit.severity || '').toUpperCase()}</span>
+        <span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">confiance ${hit.confidence}/100</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;color:var(--text-dim);margin-bottom:10px">
+        <div>Type : <span style="color:var(--text)">${escHtml(hit.ioc_type)}</span></div>
+        <div>Menace : <span style="color:var(--text)">${escHtml(hit.threat_type || '—')}</span></div>
+        <div>Source : <span style="color:var(--text)">${escHtml(hit.source)}</span></div>
+        <div>Événement MISP : <span style="color:var(--text)">${escHtml(hit.misp_event_id || '—')}</span></div>
+      </div>
+      ${hit.misp_event_info ? `<div style="font-size:12px;color:var(--text-bright);margin-bottom:10px">${escHtml(hit.misp_event_info)}</div>` : ''}
+      ${(hit.tags || []).length ? `<div style="display:flex;flex-wrap:wrap;gap:6px">${hit.tags.map(t => `<span style="background:var(--surface);border:1px solid var(--line);color:var(--text-dim);padding:2px 8px;border-radius:4px;font-size:10px;font-family:monospace">${escHtml(t)}</span>`).join('')}</div>` : ''}
+    </div>`;
 }
 
 // ════════════════════════════════════════════
