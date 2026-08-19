@@ -388,6 +388,11 @@ table.data-table tr:hover td{background:rgba(0,180,220,.03)}
 .status-pill.open{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,45,85,.25)}
 .status-pill.contained{background:var(--cyan-dim);color:var(--cyan);border:1px solid rgba(0,180,220,.25)}
 .status-pill.closed{background:var(--green-dim);color:var(--green);border:1px solid rgba(0,255,136,.25)}
+.status-pill.active,.status-pill.completed{background:var(--green-dim);color:var(--green);border:1px solid rgba(0,255,136,.25)}
+.status-pill.inactive,.status-pill.cancelled{background:rgba(120,130,140,.12);color:var(--text-dim);border:1px solid rgba(120,130,140,.25)}
+.status-pill.draft,.status-pill.waiting_approval{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(255,170,0,.25)}
+.status-pill.running{background:var(--cyan-dim);color:var(--cyan);border:1px solid rgba(0,180,220,.25)}
+.status-pill.failed{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,45,85,.25)}
 
 /* ── PROGRESS BARS ── */
 .progress-row{margin-bottom:14px}
@@ -685,6 +690,7 @@ select.form-input option{background:var(--surface)}
       <div class="tb-btn" onclick="nav('usecases')" data-page="usecases"><span class="tb-icon">⚙</span><span>Use Cases</span></div>
       <div class="tb-btn" onclick="nav('playbooks')" data-page="playbooks"><span class="tb-icon">🎭</span><span>Playbooks</span></div>
       <div class="tb-btn" onclick="nav('cases')" data-page="cases"><span class="tb-icon">🗂</span><span>Cases</span></div>
+      <div class="tb-btn" onclick="nav('automation')" data-page="automation"><span class="tb-icon">⚡</span><span>Automation</span></div>
       <div class="tb-btn" onclick="nav('chronicle')" data-page="chronicle"><span class="tb-icon">📜</span><span>Chronicle</span></div>
       <div class="tb-btn" onclick="nav('reports')" data-page="reports"><span class="tb-icon">▦</span><span>Rapports</span></div>
       <div class="tb-btn" onclick="nav('services')" data-page="services"><span class="tb-icon">◈</span><span>Services</span></div>
@@ -1078,6 +1084,33 @@ select.form-input option{background:var(--surface)}
         <div class="table-wrap"><table class="data-table" id="cases-table">
           <thead><tr><th>Titre</th><th>Statut</th><th>Sévérité</th><th>Assigné à</th><th>Créée le</th><th></th></tr></thead>
           <tbody id="cases-tbody"><tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ══ AUTOMATION (SOAR — HEPHAESTUS) ══ -->
+    <div class="page" id="page-automation">
+      <div class="section-header">
+        <div><div class="section-title">Automation — SOAR</div><div class="section-sub" id="automation-sub">Orchestration &amp; réponse automatisée — agent HEPHAESTUS</div></div>
+        <div style="display:flex;gap:10px">
+          <button class="action-btn" onclick="loadWorkflows();loadExecutions()">↺ Actualiser</button>
+          <button class="action-btn primary" onclick="openWorkflowCreateModal()">+ Nouveau workflow</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Workflows</div>
+        <div class="table-wrap"><table class="data-table" id="workflows-table">
+          <thead><tr><th>Nom</th><th>Trigger</th><th>Statut</th><th></th></tr></thead>
+          <tbody id="workflows-tbody"><tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Historique des exécutions</div>
+        <div class="table-wrap"><table class="data-table" id="executions-table">
+          <thead><tr><th>Workflow</th><th>Statut</th><th>Déclenchée le</th><th></th></tr></thead>
+          <tbody id="executions-tbody"><tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
         </table></div>
       </div>
     </div>
@@ -1508,6 +1541,7 @@ function nav(page) {
   if (page === 'usecases') loadUseCases();
   if (page === 'playbooks') loadPlaybooks();
   if (page === 'cases') loadCases();
+  if (page === 'automation') { loadWorkflows(); loadExecutions(); }
   if (page === 'chronicle') loadChronicle();
   if (page === 'augur') loadAugur();
   if (page === 'threatintel') loadThreatIntel();
@@ -2789,6 +2823,310 @@ async function submitCaseClose() {
   if (!res) { showToast('❌ Impossible de clôturer — vérifiez que toutes les tâches sont terminées'); return; }
   showToast('🏁 Case clôturée');
   await refreshCaseDetail();
+}
+
+// ════════════════════════════════════════════
+// AUTOMATION — SOAR natif (agent HEPHAESTUS)
+// ════════════════════════════════════════════
+let workflowsList = [];
+let executionsList = [];
+let wfCreateActions = [];
+let wfCreateClientsCache = [];
+let executionDetailState = null;
+
+const SOAR_ACTION_TYPES = ['create_case', 'notify', 'enrich_ip', 'run_playbook', 'escalate_severity', 'close_alert', 'webhook_external'];
+const SOAR_TRIGGER_TYPES = ['alert_created', 'use_case_match', 'case_status_change', 'manual'];
+
+async function loadWorkflows() {
+  const res = await apiCall('/soar/workflows');
+  const tbody = document.getElementById('workflows-tbody');
+  if (!res) {
+    workflowsList = [];
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune donnée — accès insuffisant ou erreur réseau</td></tr>`;
+    return;
+  }
+  workflowsList = res.data || [];
+  renderWorkflowsTable();
+}
+
+function renderWorkflowsTable() {
+  const tbody = document.getElementById('workflows-tbody');
+  if (!workflowsList.length) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun workflow</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  workflowsList.forEach(w => {
+    const tr = document.createElement('tr');
+    const toggleBtn = w.status === 'active'
+      ? `<button class="action-btn" onclick="toggleWorkflowStatus('${w.id}','deactivate')">Désactiver</button>`
+      : `<button class="action-btn" onclick="toggleWorkflowStatus('${w.id}','activate')">Activer</button>`;
+    tr.innerHTML = `
+      <td style="font-weight:600;color:var(--text-bright)">${escHtml(w.name)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(w.trigger_type)}</td>
+      <td><span class="status-pill ${w.status}">${w.status}</span></td>
+      <td style="text-align:right">${toggleBtn}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function toggleWorkflowStatus(id, action) {
+  const res = await apiCall(`/soar/workflows/${id}/${action}`, { method: 'PATCH' });
+  if (!res) { showToast('❌ Erreur mise à jour du workflow'); return; }
+  showToast(action === 'activate' ? '✅ Workflow activé' : '⏸ Workflow désactivé');
+  loadWorkflows();
+}
+
+async function openWorkflowCreateModal() {
+  const clientsRes = await apiCall('/clients?limit=100');
+  wfCreateClientsCache = clientsRes?.data || [];
+  wfCreateActions = [{ actionType: 'notify', actionParamsText: '{}', requiresApproval: false, onFailure: 'stop' }];
+
+  const modal = document.createElement('div');
+  modal.id = 'wfm-overlay';
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+  document.body.appendChild(modal);
+  renderWorkflowCreateModal();
+}
+
+function closeWorkflowCreateModal() {
+  document.getElementById('wfm-overlay')?.remove();
+}
+
+function updateWfAction(i, field, value) { wfCreateActions[i][field] = value; }
+function addWfAction() { wfCreateActions.push({ actionType: 'notify', actionParamsText: '{}', requiresApproval: false, onFailure: 'stop' }); renderWorkflowCreateModal(); }
+function removeWfAction(i) { wfCreateActions.splice(i, 1); renderWorkflowCreateModal(); }
+
+function renderWorkflowCreateModal() {
+  const modal = document.getElementById('wfm-overlay');
+  if (!modal) return;
+
+  const clientOptions = wfCreateClientsCache.map(cl => `<option value="${cl.id}">${escHtml(cl.name)}</option>`).join('');
+
+  const actionsHtml = wfCreateActions.map((a, i) => `
+    <div style="border:1px solid var(--line2);border-radius:4px;padding:12px;margin-bottom:10px;background:var(--elevated)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-family:var(--font-mono);font-size:10px;color:var(--cyan)">ÉTAPE ${i + 1}</span>
+        ${wfCreateActions.length > 1 ? `<button onclick="removeWfAction(${i})" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:14px">✕</button>` : ''}
+      </div>
+      <div class="form-grid" style="grid-template-columns:1fr 1fr">
+        <div class="form-group" style="margin-bottom:8px"><label class="form-label">Action</label>
+          <select class="form-input" onchange="updateWfAction(${i},'actionType',this.value)">
+            ${SOAR_ACTION_TYPES.map(t => `<option value="${t}" ${a.actionType === t ? 'selected' : ''}>${t}</option>`).join('')}
+          </select></div>
+        <div class="form-group" style="margin-bottom:8px"><label class="form-label">Si échec (on_failure)</label>
+          <select class="form-input" onchange="updateWfAction(${i},'onFailure',this.value)">
+            ${['stop', 'continue', 'retry'].map(t => `<option value="${t}" ${a.onFailure === t ? 'selected' : ''}>${t}</option>`).join('')}
+          </select></div>
+      </div>
+      <div class="form-group" style="margin-bottom:8px"><label class="form-label">Paramètres (JSON)</label>
+        <textarea class="form-input" rows="2" onchange="updateWfAction(${i},'actionParamsText',this.value)" style="font-family:var(--font-mono);font-size:11px">${escHtml(a.actionParamsText)}</textarea></div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim)">
+        <input type="checkbox" ${a.requiresApproval ? 'checked' : ''} onchange="updateWfAction(${i},'requiresApproval',this.checked)"/>
+        Requiert une approbation manuelle
+      </label>
+    </div>`).join('');
+
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:640px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="closeWorkflowCreateModal()"
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:24px">NOUVEAU WORKFLOW</div>
+
+      <div class="form-group"><label class="form-label">Client</label>
+        <select class="form-input" id="wfm-client"><option value="">— Sélectionner —</option>${clientOptions}</select></div>
+      <div class="form-group"><label class="form-label">Nom</label>
+        <input class="form-input" id="wfm-name" placeholder="Ex: Escalade critique + clôture"/></div>
+      <div class="form-group"><label class="form-label">Description</label>
+        <textarea class="form-input" id="wfm-desc" rows="2" placeholder="Objectif du workflow..."></textarea></div>
+      <div class="form-group"><label class="form-label">Déclencheur (trigger_type)</label>
+        <select class="form-input" id="wfm-trigger">${SOAR_TRIGGER_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}</select></div>
+      <div class="form-group"><label class="form-label">Conditions du déclencheur (JSON, optionnel)</label>
+        <textarea class="form-input" id="wfm-conditions" rows="2" placeholder='{"severity":"high"}' style="font-family:var(--font-mono);font-size:11px"></textarea></div>
+
+      <div style="font-size:11px;letter-spacing:2px;color:var(--cyan);margin:20px 0 10px">ACTIONS</div>
+      ${actionsHtml}
+      <button class="action-btn" onclick="addWfAction()">+ Ajouter une action</button>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:20px;margin-top:20px">
+        <button class="action-btn" onclick="closeWorkflowCreateModal()">Annuler</button>
+        <button class="action-btn primary" onclick="submitWorkflowCreate()">Créer le workflow</button>
+      </div>
+    </div>
+  `;
+}
+
+async function submitWorkflowCreate() {
+  const clientId = document.getElementById('wfm-client').value;
+  const name = document.getElementById('wfm-name').value.trim();
+  const description = document.getElementById('wfm-desc').value.trim();
+  const triggerType = document.getElementById('wfm-trigger').value;
+  const conditionsRaw = document.getElementById('wfm-conditions').value.trim();
+
+  if (!clientId || name.length < 3) { showToast('⚠ Client et nom (min. 3 caractères) requis'); return; }
+  if (!wfCreateActions.length) { showToast('⚠ Au moins une action requise'); return; }
+
+  let triggerConditions = null;
+  if (conditionsRaw) {
+    try { triggerConditions = JSON.parse(conditionsRaw); }
+    catch { showToast('⚠ Conditions du déclencheur : JSON invalide'); return; }
+  }
+
+  const actions = [];
+  for (const a of wfCreateActions) {
+    let actionParams = {};
+    const raw = (a.actionParamsText || '').trim();
+    if (raw) {
+      try { actionParams = JSON.parse(raw); }
+      catch { showToast(`⚠ Paramètres JSON invalides pour l'action "${a.actionType}"`); return; }
+    }
+    actions.push({ actionType: a.actionType, actionParams, requiresApproval: !!a.requiresApproval, onFailure: a.onFailure });
+  }
+
+  const res = await apiCall('/soar/workflows', {
+    method: 'POST',
+    body: JSON.stringify({ clientId, name, description: description || null, triggerType, triggerConditions, actions }),
+  });
+  if (!res) { showToast('❌ Erreur création du workflow'); return; }
+  showToast('✅ Workflow créé');
+  closeWorkflowCreateModal();
+  loadWorkflows();
+}
+
+async function loadExecutions() {
+  const res = await apiCall('/soar/executions?limit=50');
+  const tbody = document.getElementById('executions-tbody');
+  if (!res) {
+    executionsList = [];
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune donnée — accès insuffisant ou erreur réseau</td></tr>`;
+    return;
+  }
+  executionsList = res.data || [];
+  renderExecutionsTable();
+}
+
+function renderExecutionsTable() {
+  const tbody = document.getElementById('executions-tbody');
+  if (!executionsList.length) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune exécution</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  executionsList.forEach(e => {
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.onclick = () => openExecutionDetail(e.id);
+    tr.innerHTML = `
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${e.workflow_id.slice(0, 8)}…</td>
+      <td><span class="status-pill ${e.status}">${e.status.replace('_', ' ')}</span></td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${new Date(e.started_at).toLocaleString('fr-FR')}</td>
+      <td><button class="action-btn" onclick="event.stopPropagation();openExecutionDetail('${e.id}')">Voir →</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function openExecutionDetail(id) {
+  const res = await apiCall(`/soar/executions/${id}`);
+  if (!res) { showToast('❌ Exécution introuvable ou accès refusé'); return; }
+  const execution = res.data;
+
+  const wfRes = await apiCall(`/soar/workflows/${execution.workflow_id}`);
+  const workflowActionsById = {};
+  (wfRes?.data?.actions || []).forEach(a => { workflowActionsById[a.id] = a; });
+
+  executionDetailState = { execution, workflowActionsById, workflowName: wfRes?.data?.name || null };
+
+  const modal = document.createElement('div');
+  modal.id = 'exd-overlay';
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+  document.body.appendChild(modal);
+  renderExecutionDetail();
+}
+
+function closeExecutionDetail() {
+  document.getElementById('exd-overlay')?.remove();
+  executionDetailState = null;
+}
+
+async function refreshExecutionDetail() {
+  if (!executionDetailState) return;
+  const res = await apiCall(`/soar/executions/${executionDetailState.execution.id}`);
+  if (!res) return;
+  executionDetailState.execution = res.data;
+  renderExecutionDetail();
+  loadExecutions();
+}
+
+function renderExecutionDetail() {
+  const modal = document.getElementById('exd-overlay');
+  if (!modal || !executionDetailState) return;
+  const { execution, workflowActionsById, workflowName } = executionDetailState;
+  const logs = execution.logs || [];
+
+  const timelineHtml = logs.length ? logs.map(log => {
+    const action = workflowActionsById[log.action_id];
+    const icon = { success: '✅', failed: '❌', skipped: '⏭', pending_approval: '⏳' }[log.status] || '•';
+    return `
+      <div style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--line2)">
+        <div style="width:22px;height:22px;border-radius:50%;background:var(--cyan-dim);border:1px solid rgba(0,180,220,.3);
+                    display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0">${icon}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;color:var(--text-bright)">Étape ${log.step_order} — ${escHtml(action?.action_type || '—')}</div>
+          <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:3px">
+            <span class="status-pill ${log.status}">${log.status.replace('_', ' ')}</span> · ${new Date(log.executed_at).toLocaleString('fr-FR')}
+          </div>
+          ${log.error_message ? `<div style="font-size:12px;color:var(--red);margin-top:4px">${escHtml(log.error_message)}</div>` : ''}
+        </div>
+      </div>`;
+  }).join('') : `<div style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune étape journalisée</div>`;
+
+  const canApprove = execution.status === 'waiting_approval' && ['admin', 'analyst'].includes(currentUser?.role);
+
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:640px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="closeExecutionDetail()"
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:6px">EXÉCUTION</div>
+      <div style="font-size:18px;font-weight:700;color:var(--text-bright);margin-bottom:8px">${escHtml(workflowName || execution.workflow_id)}</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:20px;flex-wrap:wrap">
+        <span class="status-pill ${execution.status}">${execution.status.replace('_', ' ')}</span>
+        <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">Déclenchée le ${new Date(execution.started_at).toLocaleString('fr-FR')}</span>
+        ${execution.completed_at ? `<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">· Terminée le ${new Date(execution.completed_at).toLocaleString('fr-FR')}</span>` : ''}
+      </div>
+
+      <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Timeline</div>
+      <div>${timelineHtml}</div>
+
+      <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;border-top:1px solid var(--line);padding-top:20px;margin-top:24px">
+        <button class="action-btn" onclick="closeExecutionDetail()">Fermer</button>
+        ${canApprove ? `<button class="action-btn primary" onclick="approveExecution()">✅ Approuver</button>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+async function approveExecution() {
+  if (!executionDetailState) return;
+  if (!confirm('Approuver cette étape ? Elle sera exécutée immédiatement.')) return;
+  const res = await apiCall(`/soar/executions/${executionDetailState.execution.id}/approve`, { method: 'POST' });
+  if (!res) { showToast('❌ Erreur lors de l\'approbation'); return; }
+  showToast('✅ Étape approuvée');
+  await refreshExecutionDetail();
 }
 
 // ════════════════════════════════════════════
