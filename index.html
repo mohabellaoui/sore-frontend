@@ -691,6 +691,7 @@ select.form-input option{background:var(--surface)}
       <div class="tb-btn" onclick="nav('playbooks')" data-page="playbooks"><span class="tb-icon">🎭</span><span>Playbooks</span></div>
       <div class="tb-btn" onclick="nav('cases')" data-page="cases"><span class="tb-icon">🗂</span><span>Cases</span></div>
       <div class="tb-btn" onclick="nav('automation')" data-page="automation"><span class="tb-icon">⚡</span><span>Automation</span></div>
+      <div class="tb-btn" onclick="nav('atlas')" data-page="atlas"><span class="tb-icon">🗺</span><span>ATLAS</span></div>
       <div class="tb-btn" onclick="nav('chronicle')" data-page="chronicle"><span class="tb-icon">📜</span><span>Chronicle</span></div>
       <div class="tb-btn" onclick="nav('reports')" data-page="reports"><span class="tb-icon">▦</span><span>Rapports</span></div>
       <div class="tb-btn" onclick="nav('services')" data-page="services"><span class="tb-icon">◈</span><span>Services</span></div>
@@ -1111,6 +1112,59 @@ select.form-input option{background:var(--surface)}
         <div class="table-wrap"><table class="data-table" id="executions-table">
           <thead><tr><th>Workflow</th><th>Statut</th><th>Déclenchée le</th><th></th></tr></thead>
           <tbody id="executions-tbody"><tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ══ ATLAS (Threat Intel stratégique) ══ -->
+    <div class="page" id="page-atlas">
+      <div class="section-header">
+        <div><div class="section-title">ATLAS — Threat Intel stratégique</div><div class="section-sub" id="atlas-sub">Threat actors, campagnes, corrélation MITRE ATT&amp;CK &amp; rapports — Pôle LEXIS</div></div>
+        <button class="action-btn" onclick="loadThreatActors();loadCampaigns();loadStrategicReports()">↺ Actualiser</button>
+      </div>
+
+      <div class="card" style="margin-bottom:20px">
+        <div class="section-header" style="margin-bottom:14px">
+          <div class="card-title" style="margin:0"><span class="dot" style="background:var(--cyan)"></span>Threat Actors</div>
+          <button class="action-btn primary" onclick="openThreatActorCreateModal()">+ Nouveau threat actor</button>
+        </div>
+        <div class="table-wrap"><table class="data-table" id="threat-actors-table">
+          <thead><tr><th>Nom</th><th>Origine</th><th>Secteurs ciblés</th><th>Sophistication</th></tr></thead>
+          <tbody id="threat-actors-tbody"><tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+        </table></div>
+      </div>
+
+      <div class="card" style="margin-bottom:20px">
+        <div class="section-header" style="margin-bottom:14px">
+          <div class="card-title" style="margin:0"><span class="dot" style="background:var(--cyan)"></span>Campagnes</div>
+          <button class="action-btn primary" onclick="openCampaignCreateModal()">+ Nouvelle campagne</button>
+        </div>
+        <div class="table-wrap"><table class="data-table" id="campaigns-table">
+          <thead><tr><th>Nom</th><th>Threat actor</th><th>Statut</th><th>Sévérité</th><th>Dernière observation</th><th></th></tr></thead>
+          <tbody id="campaigns-tbody"><tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+        </table></div>
+      </div>
+
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Corrélation MITRE ATT&amp;CK</div>
+        <div class="form-grid" style="grid-template-columns:1fr 1fr auto;align-items:end;margin-bottom:16px">
+          <div class="form-group" style="margin-bottom:0"><label class="form-label">Du</label>
+            <input class="form-input" type="date" id="mitre-period-start"/></div>
+          <div class="form-group" style="margin-bottom:0"><label class="form-label">Au</label>
+            <input class="form-input" type="date" id="mitre-period-end"/></div>
+          <button class="action-btn primary" onclick="loadMitreCorrelation()">Corréler</button>
+        </div>
+        <div id="mitre-correlation-list" style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim)">Sélectionnez une période puis cliquez sur "Corréler".</div>
+      </div>
+
+      <div class="card">
+        <div class="section-header" style="margin-bottom:14px">
+          <div class="card-title" style="margin:0"><span class="dot" style="background:var(--cyan)"></span>Rapports stratégiques</div>
+          <button class="action-btn primary" id="atlas-generate-report-btn" onclick="openReportGenerateModal()" style="display:none">+ Générer un rapport</button>
+        </div>
+        <div class="table-wrap"><table class="data-table" id="strategic-reports-table">
+          <thead><tr><th>Période</th><th>Secteur</th><th>Généré le</th><th></th></tr></thead>
+          <tbody id="strategic-reports-tbody"><tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
         </table></div>
       </div>
     </div>
@@ -1542,6 +1596,7 @@ function nav(page) {
   if (page === 'playbooks') loadPlaybooks();
   if (page === 'cases') loadCases();
   if (page === 'automation') { loadWorkflows(); loadExecutions(); }
+  if (page === 'atlas') { loadThreatActors(); loadCampaigns(); loadStrategicReports(); }
   if (page === 'chronicle') loadChronicle();
   if (page === 'augur') loadAugur();
   if (page === 'threatintel') loadThreatIntel();
@@ -3127,6 +3182,500 @@ async function approveExecution() {
   if (!res) { showToast('❌ Erreur lors de l\'approbation'); return; }
   showToast('✅ Étape approuvée');
   await refreshExecutionDetail();
+}
+
+// ════════════════════════════════════════════
+// ATLAS — Threat Intel stratégique
+// ════════════════════════════════════════════
+let threatActorsList = [];
+let campaignsList = [];
+let strategicReportsList = [];
+let atlasClientsCache = [];
+let campaignDetailState = null;
+
+async function loadThreatActors() {
+  const res = await apiCall('/atlas/threat-actors');
+  const tbody = document.getElementById('threat-actors-tbody');
+  if (!res) {
+    threatActorsList = [];
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune donnée — accès insuffisant ou erreur réseau</td></tr>`;
+    return;
+  }
+  threatActorsList = res.data || [];
+  renderThreatActorsTable();
+}
+
+function renderThreatActorsTable() {
+  const tbody = document.getElementById('threat-actors-tbody');
+  if (!threatActorsList.length) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun threat actor</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  threatActorsList.forEach(a => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-weight:600;color:var(--text-bright)">${escHtml(a.name)}${a.tenant_id === null ? ' <span style="font-family:var(--font-mono);font-size:9px;color:var(--cyan)">GLOBAL</span>' : ''}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(a.origin_country || '—')}</td>
+      <td style="font-size:12px;color:var(--text-dim)">${(a.targeted_sectors || []).map(escHtml).join(', ') || '—'}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);text-transform:uppercase">${escHtml(a.sophistication_level || '—')}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function openThreatActorCreateModal() {
+  const clientsRes = await apiCall('/clients?limit=100');
+  atlasClientsCache = clientsRes?.data || [];
+
+  const modal = document.createElement('div');
+  modal.id = 'tam-overlay';
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:520px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="closeThreatActorCreateModal()"
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:24px">NOUVEAU THREAT ACTOR</div>
+
+      <div class="form-group"><label class="form-label">Client (optionnel — vide = référence globale partagée)</label>
+        <select class="form-input" id="tam-client"><option value="">— Global —</option>${atlasClientsCache.map(cl => `<option value="${cl.id}">${escHtml(cl.name)}</option>`).join('')}</select></div>
+      <div class="form-group"><label class="form-label">Nom</label>
+        <input class="form-input" id="tam-name" placeholder="Ex: APT-29"/></div>
+      <div class="form-group"><label class="form-label">Pays d'origine</label>
+        <input class="form-input" id="tam-country" placeholder="Ex: Russie"/></div>
+      <div class="form-group"><label class="form-label">Secteurs ciblés (séparés par virgule)</label>
+        <input class="form-input" id="tam-sectors" placeholder="Ex: Finance, Énergie"/></div>
+      <div class="form-group"><label class="form-label">Techniques MITRE typiques (séparées par virgule)</label>
+        <input class="form-input" id="tam-ttps" placeholder="Ex: T1110, T1078"/></div>
+      <div class="form-group"><label class="form-label">Niveau de sophistication</label>
+        <select class="form-input" id="tam-sophistication">
+          <option value="">—</option><option value="low">Low</option><option value="medium">Medium</option>
+          <option value="high">High</option><option value="advanced">Advanced</option>
+        </select></div>
+      <div class="form-group"><label class="form-label">Description</label>
+        <textarea class="form-input" id="tam-description" rows="2"></textarea></div>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:20px;margin-top:8px">
+        <button class="action-btn" onclick="closeThreatActorCreateModal()">Annuler</button>
+        <button class="action-btn primary" onclick="submitThreatActorCreate()">Créer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+function closeThreatActorCreateModal() { document.getElementById('tam-overlay')?.remove(); }
+
+async function submitThreatActorCreate() {
+  const clientId = document.getElementById('tam-client').value;
+  const name = document.getElementById('tam-name').value.trim();
+  if (name.length < 2) { showToast('⚠ Nom requis (min. 2 caractères)'); return; }
+
+  const originCountry = document.getElementById('tam-country').value.trim() || null;
+  const targetedSectors = document.getElementById('tam-sectors').value.split(',').map(s => s.trim()).filter(Boolean);
+  const typicalTtps = document.getElementById('tam-ttps').value.split(',').map(s => s.trim()).filter(Boolean);
+  const sophisticationLevel = document.getElementById('tam-sophistication').value || null;
+  const description = document.getElementById('tam-description').value.trim() || null;
+
+  const res = await apiCall('/atlas/threat-actors', {
+    method: 'POST',
+    body: JSON.stringify({ clientId: clientId || null, name, originCountry, targetedSectors, typicalTtps, sophisticationLevel, description }),
+  });
+  if (!res) { showToast('❌ Erreur création du threat actor'); return; }
+  showToast('✅ Threat actor créé');
+  closeThreatActorCreateModal();
+  loadThreatActors();
+}
+
+async function loadCampaigns() {
+  const res = await apiCall('/atlas/campaigns');
+  const tbody = document.getElementById('campaigns-tbody');
+  if (!res) {
+    campaignsList = [];
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune donnée — accès insuffisant ou erreur réseau</td></tr>`;
+    return;
+  }
+  campaignsList = res.data || [];
+  renderCampaignsTable();
+}
+
+function renderCampaignsTable() {
+  const tbody = document.getElementById('campaigns-tbody');
+  if (!campaignsList.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune campagne</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  campaignsList.forEach(c => {
+    const actor = threatActorsList.find(a => a.id === c.threat_actor_id);
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.onclick = () => openCampaignDetail(c.id);
+    tr.innerHTML = `
+      <td style="font-weight:600;color:var(--text-bright)">${escHtml(c.name)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${actor ? escHtml(actor.name) : '—'}</td>
+      <td><span class="status-pill ${c.status}">${c.status}</span></td>
+      <td>${c.severity ? `<span class="sev-badge ${c.severity}">${c.severity.toUpperCase()}</span>` : '<span style="color:var(--text-dim);font-family:var(--font-mono);font-size:11px">—</span>'}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${c.last_observed ? new Date(c.last_observed).toLocaleDateString('fr-FR') : '—'}</td>
+      <td><button class="action-btn" onclick="event.stopPropagation();openCampaignDetail('${c.id}')">Voir →</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function openCampaignCreateModal() {
+  const clientsRes = await apiCall('/clients?limit=100');
+  atlasClientsCache = clientsRes?.data || [];
+  if (!threatActorsList.length) await loadThreatActors();
+
+  const modal = document.createElement('div');
+  modal.id = 'cpm-overlay';
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:520px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="closeCampaignCreateModal()"
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:24px">NOUVELLE CAMPAGNE</div>
+
+      <div class="form-group"><label class="form-label">Client</label>
+        <select class="form-input" id="cpm-client"><option value="">— Sélectionner —</option>${atlasClientsCache.map(cl => `<option value="${cl.id}">${escHtml(cl.name)}</option>`).join('')}</select></div>
+      <div class="form-group"><label class="form-label">Nom</label>
+        <input class="form-input" id="cpm-name" placeholder="Ex: Campagne de phishing ciblé"/></div>
+      <div class="form-group"><label class="form-label">Threat actor (optionnel)</label>
+        <select class="form-input" id="cpm-actor"><option value="">— Aucun —</option>${threatActorsList.map(a => `<option value="${a.id}">${escHtml(a.name)}</option>`).join('')}</select></div>
+      <div class="form-group"><label class="form-label">Sévérité</label>
+        <select class="form-input" id="cpm-severity">
+          <option value="">—</option><option value="low">Low</option><option value="medium">Medium</option>
+          <option value="high">High</option><option value="critical">Critical</option>
+        </select></div>
+      <div class="form-group"><label class="form-label">Description</label>
+        <textarea class="form-input" id="cpm-description" rows="2"></textarea></div>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:20px;margin-top:8px">
+        <button class="action-btn" onclick="closeCampaignCreateModal()">Annuler</button>
+        <button class="action-btn primary" onclick="submitCampaignCreate()">Créer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+function closeCampaignCreateModal() { document.getElementById('cpm-overlay')?.remove(); }
+
+async function submitCampaignCreate() {
+  const clientId = document.getElementById('cpm-client').value;
+  const name = document.getElementById('cpm-name').value.trim();
+  if (!clientId || name.length < 3) { showToast('⚠ Client et nom (min. 3 caractères) requis'); return; }
+
+  const threatActorId = document.getElementById('cpm-actor').value || null;
+  const severity = document.getElementById('cpm-severity').value || null;
+  const description = document.getElementById('cpm-description').value.trim() || null;
+
+  const res = await apiCall('/atlas/campaigns', {
+    method: 'POST',
+    body: JSON.stringify({ clientId, name, threatActorId, severity, description }),
+  });
+  if (!res) { showToast('❌ Erreur création de la campagne'); return; }
+  showToast('✅ Campagne créée');
+  closeCampaignCreateModal();
+  loadCampaigns();
+}
+
+async function openCampaignDetail(id) {
+  const res = await apiCall(`/atlas/campaigns/${id}`);
+  if (!res) { showToast('❌ Campagne introuvable ou accès refusé'); return; }
+  campaignDetailState = { campaign: res.data };
+
+  const modal = document.createElement('div');
+  modal.id = 'cpd-overlay';
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+  document.body.appendChild(modal);
+  renderCampaignDetail();
+}
+
+function closeCampaignDetail() {
+  document.getElementById('cpd-overlay')?.remove();
+  campaignDetailState = null;
+}
+
+async function refreshCampaignDetail() {
+  if (!campaignDetailState) return;
+  const res = await apiCall(`/atlas/campaigns/${campaignDetailState.campaign.id}`);
+  if (!res) return;
+  campaignDetailState.campaign = res.data;
+  renderCampaignDetail();
+  loadCampaigns();
+}
+
+function renderCampaignDetail() {
+  const modal = document.getElementById('cpd-overlay');
+  if (!modal || !campaignDetailState) return;
+  const c = campaignDetailState.campaign;
+
+  const iocsHtml = (c.iocs || []).length ? c.iocs.map(i => `
+    <div style="padding:8px 12px;background:var(--elevated);border:1px solid var(--line2);border-radius:2px;margin-bottom:6px">
+      <span style="font-family:var(--font-mono);font-size:10px;color:var(--cyan);text-transform:uppercase">${escHtml(i.ioc_type)}</span>
+      <span style="font-size:12px;color:var(--text);margin-left:8px">${escHtml(i.value)}</span>
+    </div>`).join('') : `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun IOC lié</div>`;
+
+  const alertsHtml = (c.alerts || []).length ? c.alerts.map(a => `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;background:var(--elevated);border:1px solid var(--line2);border-radius:2px;margin-bottom:6px">
+      <span style="font-size:12px;color:var(--text-bright)">${escHtml(a.title)}</span>
+      <span class="sev-badge ${a.severity || 'medium'}">${(a.severity || 'medium').toUpperCase()}</span>
+    </div>`).join('') : `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune alerte liée</div>`;
+
+  const nextStatus = { active: 'contained', contained: 'closed' }[c.status] || null;
+
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:680px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="closeCampaignDetail()"
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:6px">CAMPAGNE</div>
+      <div style="font-size:20px;font-weight:700;color:var(--text-bright);margin-bottom:8px">${escHtml(c.name)}</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+        <span class="status-pill ${c.status}">${c.status}</span>
+        ${c.severity ? `<span class="sev-badge ${c.severity}">${c.severity.toUpperCase()}</span>` : ''}
+        ${c.threatActor ? `<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">Threat actor : ${escHtml(c.threatActor.name)}</span>` : ''}
+      </div>
+      ${c.description ? `<p style="color:var(--text-dim);font-size:13px;line-height:1.5;margin-bottom:20px">${escHtml(c.description)}</p>` : ''}
+
+      <div class="card-title" style="margin-top:24px"><span class="dot" style="background:var(--cyan)"></span>IOC liés</div>
+      <div>${iocsHtml}</div>
+      <button class="action-btn" style="margin-top:8px" onclick="promptLinkIoc()">+ Lier un IOC</button>
+
+      <div class="card-title" style="margin-top:24px"><span class="dot" style="background:var(--cyan)"></span>Alertes liées</div>
+      <div>${alertsHtml}</div>
+      <button class="action-btn" style="margin-top:8px" onclick="promptLinkAlert()">+ Lier une alerte</button>
+
+      <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;border-top:1px solid var(--line);padding-top:20px;margin-top:24px">
+        <button class="action-btn" onclick="closeCampaignDetail()">Fermer</button>
+        ${nextStatus ? `<button class="action-btn primary" onclick="advanceCampaignStatus('${nextStatus}')">→ ${nextStatus}</button>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+async function promptLinkIoc() {
+  if (!campaignDetailState) return;
+  const iocId = prompt('ID de l\'IOC à lier (UUID, voir onglet Threat Intel) :');
+  if (!iocId) return;
+  const res = await apiCall(`/atlas/campaigns/${campaignDetailState.campaign.id}/iocs`, { method: 'POST', body: JSON.stringify({ iocId: iocId.trim() }) });
+  if (!res) { showToast('❌ Erreur liaison IOC'); return; }
+  showToast('✅ IOC lié');
+  await refreshCampaignDetail();
+}
+
+async function promptLinkAlert() {
+  if (!campaignDetailState) return;
+  const alertId = prompt('ID de l\'alerte à lier (UUID, voir onglet SOC) :');
+  if (!alertId) return;
+  const res = await apiCall(`/atlas/campaigns/${campaignDetailState.campaign.id}/alerts`, { method: 'POST', body: JSON.stringify({ alertId: alertId.trim() }) });
+  if (!res) { showToast('❌ Erreur liaison alerte'); return; }
+  showToast('✅ Alerte liée');
+  await refreshCampaignDetail();
+}
+
+async function advanceCampaignStatus(status) {
+  if (!campaignDetailState) return;
+  const res = await apiCall(`/atlas/campaigns/${campaignDetailState.campaign.id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+  if (!res) { showToast('❌ Erreur changement de statut'); return; }
+  showToast(`✅ Campagne → ${status}`);
+  await refreshCampaignDetail();
+}
+
+async function loadMitreCorrelation() {
+  const start = document.getElementById('mitre-period-start').value;
+  const end = document.getElementById('mitre-period-end').value;
+  const container = document.getElementById('mitre-correlation-list');
+  if (!start || !end) { showToast('⚠ Sélectionnez une période (du / au)'); return; }
+
+  const res = await apiCall(`/atlas/mitre-correlation?periodStart=${start}&periodEnd=${end}`);
+  if (!res) {
+    container.innerHTML = `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune donnée — accès insuffisant ou erreur réseau</div>`;
+    return;
+  }
+  const entries = Object.entries(res.data || {});
+  if (!entries.length) {
+    container.innerHTML = `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune technique corrélée sur cette période</div>`;
+    return;
+  }
+  const max = Math.max(...entries.map(([, count]) => count));
+  container.innerHTML = entries.map(([technique, count]) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+      <span style="font-family:var(--font-mono);font-size:11px;color:var(--cyan);width:70px;flex-shrink:0">${escHtml(technique)}</span>
+      <div style="flex:1;height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${(count / max) * 100}%;background:linear-gradient(90deg,var(--cyan),#00ffaa)"></div>
+      </div>
+      <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);width:30px;text-align:right">${count}</span>
+    </div>`).join('');
+}
+
+async function loadStrategicReports() {
+  const btn = document.getElementById('atlas-generate-report-btn');
+  if (btn) btn.style.display = currentUser?.role === 'admin' ? '' : 'none';
+
+  const res = await apiCall('/atlas/reports');
+  const tbody = document.getElementById('strategic-reports-tbody');
+  if (!res) {
+    strategicReportsList = [];
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune donnée — accès insuffisant ou erreur réseau</td></tr>`;
+    return;
+  }
+  strategicReportsList = res.data || [];
+  renderStrategicReportsTable();
+}
+
+function renderStrategicReportsTable() {
+  const tbody = document.getElementById('strategic-reports-tbody');
+  if (!strategicReportsList.length) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun rapport</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  strategicReportsList.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.onclick = () => openStrategicReportDetail(r.id);
+    tr.innerHTML = `
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${new Date(r.period_start).toLocaleDateString('fr-FR')} → ${new Date(r.period_end).toLocaleDateString('fr-FR')}</td>
+      <td style="font-size:12px;color:var(--text-bright)">${escHtml(r.sector || '—')}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${new Date(r.created_at).toLocaleString('fr-FR')}</td>
+      <td><button class="action-btn" onclick="event.stopPropagation();openStrategicReportDetail('${r.id}')">Voir →</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function openReportGenerateModal() {
+  const clientsRes = await apiCall('/clients?limit=100');
+  atlasClientsCache = clientsRes?.data || [];
+
+  const modal = document.createElement('div');
+  modal.id = 'rgm-overlay';
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:480px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="closeReportGenerateModal()"
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:24px">GÉNÉRER UN RAPPORT STRATÉGIQUE</div>
+
+      <div class="form-group"><label class="form-label">Client</label>
+        <select class="form-input" id="rgm-client"><option value="">— Sélectionner —</option>${atlasClientsCache.map(cl => `<option value="${cl.id}">${escHtml(cl.name)}</option>`).join('')}</select></div>
+      <div class="form-group"><label class="form-label">Du</label>
+        <input class="form-input" type="date" id="rgm-start"/></div>
+      <div class="form-group"><label class="form-label">Au</label>
+        <input class="form-input" type="date" id="rgm-end"/></div>
+      <div class="form-group"><label class="form-label">Secteur (optionnel)</label>
+        <input class="form-input" id="rgm-sector" placeholder="Ex: Finance"/></div>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:20px;margin-top:8px">
+        <button class="action-btn" onclick="closeReportGenerateModal()">Annuler</button>
+        <button class="action-btn primary" id="rgm-submit-btn" onclick="submitReportGenerate()">Générer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+function closeReportGenerateModal() { document.getElementById('rgm-overlay')?.remove(); }
+
+async function submitReportGenerate() {
+  const clientId = document.getElementById('rgm-client').value;
+  const start = document.getElementById('rgm-start').value;
+  const end = document.getElementById('rgm-end').value;
+  if (!clientId || !start || !end) { showToast('⚠ Client et période requis'); return; }
+  const sector = document.getElementById('rgm-sector').value.trim() || null;
+
+  const btn = document.getElementById('rgm-submit-btn');
+  btn.disabled = true; btn.textContent = 'Génération en cours...';
+
+  const res = await apiCall('/atlas/reports/generate', {
+    method: 'POST',
+    body: JSON.stringify({ clientId, periodStart: start, periodEnd: end, sector }),
+  });
+
+  btn.disabled = false; btn.textContent = 'Générer';
+
+  if (!res) { showToast('❌ Erreur génération du rapport'); return; }
+  showToast('✅ Rapport généré');
+  closeReportGenerateModal();
+  loadStrategicReports();
+  openStrategicReportDetail(res.data.id);
+}
+
+async function openStrategicReportDetail(id) {
+  const res = await apiCall(`/atlas/reports/${id}`);
+  if (!res) { showToast('❌ Rapport introuvable ou accès refusé'); return; }
+  const r = res.data;
+
+  const modal = document.createElement('div');
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+
+  const topActorsHtml = (r.top_threat_actors || []).length
+    ? r.top_threat_actors.map(a => `<div style="font-size:12px;color:var(--text-dim);margin-bottom:4px">• ${escHtml(a.name)} (${a.campaignCount} campagne(s))</div>`).join('')
+    : `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun</div>`;
+
+  const mitreHtml = Object.keys(r.mitre_techniques_summary || {}).length
+    ? Object.entries(r.mitre_techniques_summary).map(([t, c]) => `<span style="font-family:var(--font-mono);font-size:10px;color:var(--cyan);background:var(--cyan-dim);border:1px solid rgba(0,180,220,.25);border-radius:2px;padding:2px 8px;margin-right:6px;margin-bottom:6px;display:inline-block">${escHtml(t)} × ${c}</span>`).join('')
+    : `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune</div>`;
+
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:680px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="this.closest('[style*=fixed]').remove()"
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:6px">RAPPORT STRATÉGIQUE</div>
+      <div style="font-size:18px;font-weight:700;color:var(--text-bright);margin-bottom:8px">${new Date(r.period_start).toLocaleDateString('fr-FR')} → ${new Date(r.period_end).toLocaleDateString('fr-FR')}</div>
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-bottom:20px">${r.sector ? escHtml(r.sector) + ' · ' : ''}Généré le ${new Date(r.created_at).toLocaleString('fr-FR')} par ${escHtml(r.generated_by)}</div>
+
+      <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Synthèse</div>
+      <p style="color:var(--text);font-size:13px;line-height:1.6;white-space:pre-wrap;margin-bottom:20px">${escHtml(r.narrative)}</p>
+
+      <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Threat actors les plus actifs</div>
+      <div style="margin-bottom:20px">${topActorsHtml}</div>
+
+      <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Techniques MITRE ATT&amp;CK</div>
+      <div style="margin-bottom:8px">${mitreHtml}</div>
+
+      <div style="display:flex;justify-content:flex-end;border-top:1px solid var(--line);padding-top:20px;margin-top:24px">
+        <button class="action-btn" onclick="this.closest('[style*=fixed]').remove()">Fermer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
 }
 
 // ════════════════════════════════════════════
