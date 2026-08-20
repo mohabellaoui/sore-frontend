@@ -642,6 +642,66 @@ select.form-input option{background:var(--surface)}
 }
 .toast.show{transform:translateX(0)}
 
+/* ── ARGUS — Nouveau scan (saisie → orchestration → rapport) ── */
+.argus-scan-panel{
+  background:var(--elevated);border:1px solid var(--line2);border-radius:2px;
+  padding:18px 20px;margin-bottom:20px;
+}
+.argus-scan-form{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap}
+.argus-scan-form .form-group{flex:1;min-width:200px;margin-bottom:0}
+.argus-scan-progress{display:none;margin-top:18px}
+.argus-scan-steps{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.argus-scan-step{
+  display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:2px;
+  background:var(--surface);border:1px solid var(--line2);
+  font-family:var(--font-mono);font-size:10px;color:var(--text-dim);
+  text-transform:uppercase;letter-spacing:.04em;
+}
+.argus-scan-step .argus-step-icon{
+  width:16px;height:16px;border-radius:50%;border:1px solid var(--text-dim);
+  display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0;
+}
+.argus-scan-step.done{border-color:rgba(0,255,136,.3);color:var(--green)}
+.argus-scan-step.done .argus-step-icon{border-color:var(--green);background:var(--green-dim);color:var(--green)}
+.argus-scan-step.active{border-color:var(--cyan);color:var(--cyan)}
+.argus-scan-step.active .argus-step-icon{border-color:var(--cyan);border-top-color:transparent;animation:argus-spin .7s linear infinite}
+.argus-scan-step.error{border-color:rgba(255,45,85,.4);color:var(--red)}
+.argus-scan-step.error .argus-step-icon{border-color:var(--red);background:var(--red-dim);color:var(--red)}
+.argus-scan-step.warning{border-color:rgba(255,170,0,.4);color:var(--amber)}
+.argus-scan-step.warning .argus-step-icon{border-color:var(--amber);background:var(--amber-dim);color:var(--amber)}
+@keyframes argus-spin{to{transform:rotate(360deg)}}
+.argus-scan-status-msg{margin-top:10px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)}
+.argus-scan-status-msg.error{color:var(--red)}
+.argus-scan-status-msg.warning{color:var(--amber)}
+.argus-report{display:none;margin-top:20px}
+.argus-report-header{
+  display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:14px;
+  padding:18px 20px;background:var(--elevated);border:1px solid var(--line2);border-radius:2px;margin-bottom:16px;
+}
+.argus-report-header h3{font-family:var(--font-body);font-size:16px;color:var(--text-bright);margin:0 0 4px}
+.argus-report-meta{font-family:var(--font-mono);font-size:11px;color:var(--text-dim)}
+.argus-report-score{text-align:right}
+.argus-report-score .val{font-family:var(--font-mono);font-size:28px;font-weight:700;color:var(--cyan)}
+.argus-report-score .lbl{font-family:var(--font-mono);font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em}
+.argus-report-section{margin-bottom:18px}
+.argus-report-section h4{
+  font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--cyan);margin:0 0 10px;display:flex;align-items:center;gap:8px;
+}
+.argus-clean-badge{
+  display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:2px;
+  background:var(--green-dim);border:1px solid rgba(0,255,136,.25);color:var(--green);
+  font-family:var(--font-mono);font-size:11px;
+}
+.argus-report-note{font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:8px;font-style:italic}
+.argus-reco-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.argus-reco-item{
+  display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:2px;
+  background:var(--surface);border:1px solid var(--line2);font-family:var(--font-mono);font-size:11px;
+  color:var(--text-dim);
+}
+.argus-reco-item .sev-badge{flex-shrink:0}
+
 /* ── RESPONSIVE ── */
 @media(max-width:900px){
   .stats-grid{grid-template-columns:1fr 1fr}
@@ -1196,6 +1256,53 @@ select.form-input option{background:var(--surface)}
           <select class="form-input" id="argus-client-select" style="display:none;min-width:220px" onchange="onArgusClientChange()"></select>
           <button class="action-btn" onclick="loadArgusPage()">↺ Actualiser</button>
         </div>
+      </div>
+
+      <!-- ══ NOUVEAU SCAN — saisie société/domaine → orchestration complète → rapport ══
+           Note d'implémentation (vérifié contre le backend réel avant d'écrire ce code) :
+           la création de périmètre (`POST /api/argus/scope`) exige un `clientId` référençant
+           une ligne `clients` déjà existante — il n'existe aucune route pour créer un client
+           à la volée depuis un simple nom de société tapé au clavier. Le champ "Société"
+           ci-dessous est donc une saisie avec autocomplétion (`<datalist>`) contrainte à la
+           liste des clients déjà en base (même source que le sélecteur en haut de page) —
+           un nom qui ne correspond à aucun client existant est refusé avec un message clair,
+           plutôt que d'inventer un client fantôme. -->
+      <div class="argus-scan-panel">
+        <div class="card-title" style="margin:0 0 14px"><span class="dot" style="background:var(--cyan)"></span>Nouveau scan</div>
+        <div class="argus-scan-form">
+          <div class="form-group">
+            <label class="form-label">Nom de la société</label>
+            <input class="form-input" id="argus-scan-company" list="argus-scan-company-list" placeholder="Ex. Cash Plus" autocomplete="off"/>
+            <datalist id="argus-scan-company-list"></datalist>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Domaine principal</label>
+            <input class="form-input" id="argus-scan-domain" placeholder="Ex. cashplus.ma" autocomplete="off"/>
+          </div>
+          <button class="action-btn primary" id="argus-scan-launch-btn" onclick="argusScanStart()">▶ Lancer le scan</button>
+        </div>
+
+        <div class="argus-scan-progress" id="argus-scan-progress">
+          <div class="argus-scan-steps" id="argus-scan-steps"></div>
+          <div class="argus-scan-status-msg" id="argus-scan-status-msg">—</div>
+        </div>
+      </div>
+
+      <div class="argus-report" id="argus-report">
+        <div class="argus-report-header">
+          <div>
+            <h3 id="argus-report-title">—</h3>
+            <div class="argus-report-meta" id="argus-report-meta">—</div>
+          </div>
+          <div style="display:flex;gap:16px;align-items:center">
+            <div class="argus-report-score">
+              <div class="val" id="argus-report-score-val">—</div>
+              <div class="lbl">Score d'exposition</div>
+            </div>
+            <button class="action-btn" onclick="argusExportScanReport()">🖨 Exporter le rapport</button>
+          </div>
+        </div>
+        <div id="argus-report-content"></div>
       </div>
 
       <div class="stats-grid">
@@ -4068,6 +4175,324 @@ async function updateArgusExposureStatus(id, status) {
   showToast(`✅ Exposition → ${status}`);
   loadArgusExposures();
   loadArgusSummary();
+}
+
+// ════════════════════════════════════════════
+// ARGUS — Nouveau scan : saisie société/domaine → orchestration complète → rapport
+// ════════════════════════════════════════════
+//
+// Vérifié contre le backend réel avant d'écrire ce code (src/agents/argus.js,
+// src/index.js) — plusieurs écarts avec un flux "naïf" ont été corrigés ici :
+//  - POST /api/argus/scope/suggest ignore totalement un domaine fourni en body
+//    (il dérive uniquement de clients.email/sessions AUGUR côté serveur) — la
+//    route réelle pour enregistrer le domaine tapé par l'utilisateur est
+//    POST /api/argus/scope (ajout manuel, assetType='domain'), déjà utilisée
+//    par le reste de cet onglet (submitArgusScopeAdd).
+//  - Un scope déjà existant renvoie HTTP 400 (pas 409) avec un message
+//    contenant "déjà enregistré" — géré ci-dessous en conséquence.
+//  - GET /api/argus/summary est global au tenant, sans filtre scopeId possible
+//    (vérifié dans la route) — le score affiché est donc le score global du
+//    tenant, pas un score isolé à ce seul scan.
+//  - POST /api/argus/scan/github-leaks ne renvoie jamais 429 : le rate limit
+//    GitHub est absorbé en interne par searchGithubLeaks (pause + poursuite,
+//    jamais propagé au client). En proxy honnête de "rate limit atteint", on
+//    affiche l'avertissement quand un asset scanné retourne scanned:0.
+
+const ARGUS_SCAN_STEPS = [
+  { id: 'scope', label: 'Scope' },
+  { id: 'approve', label: 'Approbation' },
+  { id: 'scan', label: 'Scan passif' },
+  { id: 'assets', label: 'Assets' },
+  { id: 'github', label: 'GitHub Leaks' },
+  { id: 'report', label: 'Rapport' },
+];
+let argusScanRunning = false;
+
+function argusScanRenderSteps(states) {
+  document.getElementById('argus-scan-steps').innerHTML = ARGUS_SCAN_STEPS.map((s, i) => {
+    const st = states[i] || 'pending';
+    const icon = st === 'done' ? '✓' : st === 'error' ? '✕' : st === 'warning' ? '!' : '';
+    return `<div class="argus-scan-step ${st}"><span class="argus-step-icon">${icon}</span>${escHtml(s.label)}</div>`;
+  }).join('');
+}
+
+function argusScanSetStatus(msg, level) {
+  const el = document.getElementById('argus-scan-status-msg');
+  el.textContent = msg;
+  el.className = 'argus-scan-status-msg' + (level ? ' ' + level : '');
+}
+
+/**
+ * Fetch dédié à ce flux — pas le apiCall() partagé, qui avale le status code
+ * et le corps de la réponse en cas d'erreur (`return res.ok ? res.json() : null`)
+ * et est donc inutilisable ici : la gestion d'erreurs demandée dépend
+ * explicitement du status HTTP réel (400 "déjà enregistré", 503 clé GitHub
+ * absente, timeout > 15s pour un cold start Render...). Timeout 15s, un seul
+ * retry automatique avec un délai plus long (60s) sur timeout, comme demandé.
+ */
+async function argusScanFetch(path, options = {}, timeoutMs = 15000, isRetry = false) {
+  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+  try {
+    const res = await fetch(`${API}${path}`, { ...options, headers, signal: AbortSignal.timeout(timeoutMs) });
+    let data = null;
+    try { data = await res.json(); } catch { /* réponse sans corps JSON exploitable */ }
+    return { ok: res.ok, status: res.status, data };
+  } catch (e) {
+    if (e.name === 'TimeoutError' && !isRetry) {
+      argusScanSetStatus('⏳ Démarrage du serveur... (plan gratuit, 30-60s) — nouvelle tentative...', 'warning');
+      return argusScanFetch(path, options, 60000, true);
+    }
+    return { ok: false, status: 0, data: null, networkError: true };
+  }
+}
+
+async function argusScanEnsureClientsCache() {
+  if (!argusClientsCache.length) {
+    const res = await apiCall('/clients?limit=100');
+    argusClientsCache = res?.data || [];
+  }
+  document.getElementById('argus-scan-company-list').innerHTML =
+    argusClientsCache.map(c => `<option value="${escHtml(c.name)}"></option>`).join('');
+}
+
+function argusConfidenceBadge(confidence) {
+  const map = { high: 'critical', medium: 'medium', low: 'low' };
+  return `<span class="sev-badge ${map[confidence] || 'info'}">${escHtml(confidence || '—')}</span>`;
+}
+
+async function argusScanStart() {
+  if (argusScanRunning) return;
+  const companyName = document.getElementById('argus-scan-company').value.trim();
+  const domain = document.getElementById('argus-scan-domain').value.trim().toLowerCase();
+  if (!companyName || !domain) { showToast('⚠ Nom de la société et domaine requis'); return; }
+
+  await argusScanEnsureClientsCache();
+  const client = argusClientsCache.find(c => c.name.toLowerCase() === companyName.toLowerCase());
+  if (!client) {
+    showToast("❌ Aucun client existant ne correspond à ce nom — sélectionnez-le dans la liste, ou créez-le d'abord (onglet Clients)");
+    return;
+  }
+  argusSelectedClientId = client.id;
+  const selectEl = document.getElementById('argus-client-select');
+  if (selectEl) selectEl.value = client.id;
+
+  argusScanRunning = true;
+  document.getElementById('argus-scan-launch-btn').disabled = true;
+  document.getElementById('argus-scan-progress').style.display = '';
+  document.getElementById('argus-report').style.display = 'none';
+  const states = ARGUS_SCAN_STEPS.map(() => 'pending');
+  states[0] = 'active';
+  argusScanRenderSteps(states);
+  argusScanSetStatus('Création / vérification du périmètre...');
+
+  try {
+    // ── ÉTAPE 1 — scope (POST /api/argus/scope, ajout manuel — voir note en tête de section)
+    let scopeId, scopeRow;
+    const scopeRes = await argusScanFetch('/argus/scope', {
+      method: 'POST', body: JSON.stringify({ clientId: client.id, assetValue: domain, assetType: 'domain' }),
+    });
+    if (scopeRes.ok) {
+      scopeRow = scopeRes.data?.data;
+      scopeId = scopeRow?.id;
+    } else if (scopeRes.status === 400 && /déjà enregistré/i.test(scopeRes.data?.error || '')) {
+      const listRes = await argusScanFetch(`/argus/scope?clientId=${client.id}`);
+      scopeRow = (listRes.data?.data || []).find(s => s.asset_value === domain);
+      scopeId = scopeRow?.id;
+      if (!scopeId) throw new Error('Scope signalé comme déjà existant mais introuvable dans la liste.');
+    } else {
+      throw new Error(scopeRes.data?.error || `Échec création du périmètre (HTTP ${scopeRes.status})`);
+    }
+    states[0] = 'done'; states[1] = 'active'; argusScanRenderSteps(states);
+    argusScanSetStatus('Approbation du périmètre...');
+
+    // ── ÉTAPE 2 — approbation (skip si déjà approuvé — cas du scope récupéré ci-dessus)
+    if (scopeRow?.status !== 'approved') {
+      const approveRes = await argusScanFetch(`/argus/scope/${scopeId}/approve`, { method: 'PATCH' });
+      if (!approveRes.ok) throw new Error(approveRes.data?.error || `Échec approbation (HTTP ${approveRes.status})`);
+    }
+    states[1] = 'done'; states[2] = 'active'; argusScanRenderSteps(states);
+    argusScanSetStatus('Scan passif — DNS, certificats TLS, headers HTTP, corrélation CVE...');
+
+    // ── ÉTAPE 3 — scan passif complet
+    const scanRes = await argusScanFetch(`/argus/scan/${scopeId}`, { method: 'POST' });
+    if (!scanRes.ok) throw new Error(scanRes.data?.error || `Échec scan passif (HTTP ${scanRes.status})`);
+    states[2] = 'done'; states[3] = 'active'; argusScanRenderSteps(states);
+    argusScanSetStatus('Récupération des actifs découverts...');
+
+    // ── ÉTAPE 4 — assets du scope
+    const assetsRes = await argusScanFetch(`/argus/assets?clientId=${client.id}&scopeId=${scopeId}`);
+    if (!assetsRes.ok) throw new Error(assetsRes.data?.error || `Échec récupération des actifs (HTTP ${assetsRes.status})`);
+    const assets = assetsRes.data?.data || [];
+    states[3] = 'done'; states[4] = 'active'; argusScanRenderSteps(states);
+
+    // ── ÉTAPE 5 — GitHub Leak Scan sur 3 actifs uniques max (dédupliqués par asset_value)
+    const uniqueAssetValues = [...new Map(assets.map(a => [a.asset_value, a])).values()];
+    const githubTargets = uniqueAssetValues.slice(0, 3);
+    let githubWarning = null;
+    if (githubTargets.length) {
+      argusScanSetStatus(`Scan GitHub Leaks sur ${githubTargets.length} actif(s)...`);
+      const results = await Promise.allSettled(
+        githubTargets.map(a => argusScanFetch('/argus/scan/github-leaks', {
+          method: 'POST', body: JSON.stringify({ scopeId, assetId: a.id }),
+        }))
+      );
+      const configMissing = results.some(r => r.status === 'fulfilled' && r.value.status === 503);
+      const rateLimited = results.some(r => r.status === 'fulfilled' && r.value.ok && (r.value.data?.data?.scanned ?? 0) === 0);
+      if (configMissing) { githubWarning = 'Scan GitHub Leaks indisponible (clé API GitHub non configurée côté serveur).'; states[4] = 'warning'; }
+      else if (rateLimited) { githubWarning = 'Rate limit GitHub atteint — findings partiels.'; states[4] = 'warning'; }
+      else { states[4] = 'done'; }
+    } else {
+      states[4] = 'done'; // aucun actif à scanner — pas une erreur
+    }
+    states[5] = 'active'; argusScanRenderSteps(states);
+    argusScanSetStatus(githubWarning ? '⚠ ' + githubWarning : 'Génération du rapport...', githubWarning ? 'warning' : null);
+
+    // ── ÉTAPE 6 — findings GitHub + résumé d'exposition + expositions CVE des actifs de ce scope
+    const [findingsRes, summaryRes, exposuresRes] = await Promise.all([
+      argusScanFetch(`/argus/findings/github-leaks?clientId=${client.id}&scopeId=${scopeId}`),
+      argusScanFetch(`/argus/summary?clientId=${client.id}`),
+      argusScanFetch(`/argus/exposures?clientId=${client.id}`),
+    ]);
+    const findings = findingsRes.data?.data || [];
+    const summary = summaryRes.data?.data || null;
+    const assetIds = new Set(assets.map(a => a.id));
+    const exposures = (exposuresRes.data?.data || []).filter(e => assetIds.has(e.asset_id));
+
+    states[5] = 'done'; argusScanRenderSteps(states);
+    argusScanSetStatus(githubWarning ? '⚠ Scan terminé avec avertissement — ' + githubWarning : '✅ Scan terminé.', githubWarning ? 'warning' : null);
+
+    argusRenderScanReport({ companyName: client.name, domain, scopeId, assets, exposures, findings, summary });
+    loadArgusScope(); loadArgusAssets(); loadArgusExposures(); loadArgusSummary();
+  } catch (e) {
+    argusScanRenderSteps(states.map(s => s === 'active' ? 'error' : s));
+    argusScanSetStatus('❌ ' + e.message, 'error');
+    showToast('❌ ' + e.message);
+  } finally {
+    argusScanRunning = false;
+    document.getElementById('argus-scan-launch-btn').disabled = false;
+  }
+}
+
+function argusRenderScanReport({ companyName, domain, assets, exposures, findings, summary }) {
+  const assetsById = new Map(assets.map(a => [a.id, a]));
+  const groups = new Map();
+  for (const a of assets) {
+    if (!groups.has(a.asset_value)) groups.set(a.asset_value, { assetValue: a.asset_value, ips: [], tls: null, headers: null, cves: [] });
+    const g = groups.get(a.asset_value);
+    if (a.asset_kind === 'subdomain' && a.details?.resolvedIps) g.ips = a.details.resolvedIps;
+    if (a.asset_kind === 'certificate') g.tls = a.details;
+    if (a.asset_kind === 'service') g.headers = a.details?.headers || null;
+  }
+  for (const e of exposures) {
+    const owner = assetsById.get(e.asset_id);
+    if (owner && groups.has(owner.asset_value)) groups.get(owner.asset_value).cves.push(e);
+  }
+  const rows = [...groups.values()];
+
+  const cvssBadgeClass = n => n >= 9 ? 'critical' : n >= 7 ? 'high' : n >= 4 ? 'medium' : 'low';
+  const surfaceRows = rows.length ? rows.map(g => {
+    const hasCves = g.cves.length > 0;
+    const hasHeaders = g.headers && Object.keys(g.headers).length > 0;
+    const rowStyle = hasCves ? 'background:rgba(255,45,85,.06)' : hasHeaders ? 'background:rgba(255,170,0,.05)' : '';
+    const tlsCell = g.tls
+      ? (g.tls.expiringSoon ? `<span style="color:var(--amber)">⚠ expire dans ${g.tls.daysUntilExpiry}j</span>` : `<span style="color:var(--green)">✓ valide</span>`)
+      : '<span style="color:var(--text-dim)">—</span>';
+    const headersCell = hasHeaders
+      ? escHtml(Object.entries(g.headers).map(([k, v]) => `${k}: ${v}`).join(', '))
+      : '<span style="color:var(--text-dim)">aucun</span>';
+    const cvesCell = hasCves
+      ? g.cves.map(c => `<span class="sev-badge ${cvssBadgeClass(Number(c.cvss_score) || 0)}">${escHtml(c.cve_id || '?')}</span>`).join(' ')
+      : '<span style="color:var(--text-dim)">—</span>';
+    return `<tr style="${rowStyle}">
+      <td style="font-weight:600;color:var(--text-bright)">${escHtml(g.assetValue)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${g.assetValue === domain ? 'domaine racine' : 'sous-domaine'}</td>
+      <td style="font-family:var(--font-mono);font-size:11px">${g.ips.length ? escHtml(g.ips.join(', ')) : '<span style="color:var(--text-dim)">—</span>'}</td>
+      <td>${tlsCell}</td>
+      <td style="font-size:11px">${headersCell}</td>
+      <td>${cvesCell}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--text-dim);font-family:var(--font-mono);font-size:11px">Aucun actif découvert</td></tr>`;
+
+  const githubSection = findings.length
+    ? `<div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Repo</th><th>Fichier</th><th>Type</th><th>Confiance</th><th>Snippet redacté</th><th>Statut</th></tr></thead>
+        <tbody>${findings.map(f => `<tr>
+          <td style="font-size:11px">${escHtml(f.repo_url)}</td>
+          <td style="font-family:var(--font-mono);font-size:11px">${escHtml(f.file_path)}</td>
+          <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(f.finding_type)}</td>
+          <td>${argusConfidenceBadge(f.confidence)}</td>
+          <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(f.matched_snippet)}</td>
+          <td><span class="status-pill ${f.status}">${escHtml(f.status)}</span></td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+      <div class="argus-report-note">Les valeurs sensibles ne sont jamais affichées — seul un extrait rédigé est conservé. En cas de finding confirmé, contacter le client pour rotation immédiate du secret.</div>`
+    : `<div class="argus-clean-badge">✓ Aucun credential exposé détecté</div>`;
+
+  const recos = [];
+  const openFindings = findings.filter(f => !['false_positive', 'remediated'].includes(f.status));
+  openFindings.filter(f => f.confidence === 'high').forEach(f => recos.push({ sev: 'critical', text: `Secret exposé (${f.finding_type}) dans ${f.repo_url} — ${f.file_path} : faire tourner la valeur immédiatement.` }));
+  exposures.filter(e => e.status === 'open' && Number(e.cvss_score) >= 9).forEach(e => recos.push({ sev: 'critical', text: `CVE critique ${e.cve_id} (CVSS ${e.cvss_score}) sur ${e.detected_service || 'service inconnu'} — patcher en priorité.` }));
+  openFindings.filter(f => f.confidence === 'medium').forEach(f => recos.push({ sev: 'high', text: `Secret potentiellement exposé (${f.finding_type}) dans ${f.repo_url} — vérifier et faire tourner si confirmé.` }));
+  exposures.filter(e => e.status === 'open' && Number(e.cvss_score) >= 7 && Number(e.cvss_score) < 9).forEach(e => recos.push({ sev: 'high', text: `CVE élevée ${e.cve_id} (CVSS ${e.cvss_score}) — planifier le correctif.` }));
+  rows.filter(g => g.tls?.expiringSoon).forEach(g => recos.push({ sev: 'medium', text: `Certificat TLS de ${g.assetValue} expire dans ${g.tls.daysUntilExpiry} jour(s) — renouveler.` }));
+  exposures.filter(e => e.status === 'open' && Number(e.cvss_score) >= 4 && Number(e.cvss_score) < 7).forEach(e => recos.push({ sev: 'medium', text: `CVE modérée ${e.cve_id} (CVSS ${e.cvss_score}).` }));
+  if (!recos.length) recos.push({ sev: 'info', text: 'Aucune action corrective urgente identifiée à ce stade.' });
+
+  document.getElementById('argus-report-title').textContent = `${companyName} — ${domain}`;
+  document.getElementById('argus-report-meta').textContent = `Scan effectué le ${new Date().toLocaleString('fr-FR')}`;
+  document.getElementById('argus-report-score-val').textContent = summary?.currentScore ?? '—';
+  document.getElementById('argus-report-content').innerHTML = `
+    <div class="argus-report-section">
+      <h4>Surface d'attaque — actifs découverts</h4>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Sous-domaine</th><th>Type</th><th>IP</th><th>TLS</th><th>Headers exposés (fingerprinting)</th><th>CVEs</th></tr></thead>
+        <tbody>${surfaceRows}</tbody>
+      </table></div>
+    </div>
+    <div class="argus-report-section">
+      <h4>GitHub Credential Exposure</h4>
+      ${githubSection}
+    </div>
+    <div class="argus-report-section">
+      <h4>Recommandations</h4>
+      <ul class="argus-reco-list">${recos.map(r => `<li class="argus-reco-item"><span class="sev-badge ${r.sev}">${escHtml(r.sev)}</span>${escHtml(r.text)}</li>`).join('')}</ul>
+    </div>
+  `;
+  document.getElementById('argus-report').style.display = '';
+  document.getElementById('argus-report').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function argusExportScanReport() {
+  const content = document.getElementById('argus-report-content').innerHTML;
+  const title = document.getElementById('argus-report-title').textContent;
+  const meta = document.getElementById('argus-report-meta').textContent;
+  const score = document.getElementById('argus-report-score-val').textContent;
+  const win = window.open('', '_blank');
+  if (!win) { showToast('⚠ Pop-up bloquée — autorisez les pop-ups pour exporter'); return; }
+  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Rapport ARGUS — ${title}</title>
+    <style>
+      *{box-sizing:border-box;color:#000 !important;background:transparent !important}
+      body{background:#fff !important;font-family:'JetBrains Mono',monospace;padding:32px;font-size:12px}
+      h1{font-size:18px;margin:0 0 4px}
+      h4{font-size:12px;text-transform:uppercase;letter-spacing:.06em;margin:22px 0 8px;border-bottom:1px solid #000;padding-bottom:4px}
+      table{width:100%;border-collapse:collapse;margin-bottom:10px;background:#fff !important}
+      th,td{border:1px solid #000;padding:6px 8px;text-align:left;font-size:11px;background:#fff !important}
+      th{background:#eee !important}
+      .sev-badge,.status-pill{border:1px solid #000;padding:2px 6px;border-radius:2px}
+      .argus-clean-badge{border:1px solid #000;padding:8px 12px;display:inline-block}
+      .argus-reco-item{border:1px solid #000;padding:8px;margin-bottom:6px;list-style:none}
+      .argus-report-note{font-style:italic;margin-top:6px}
+      @media print{body{padding:12px}}
+    </style>
+  </head><body>
+    <h1>${escHtml(title)}</h1>
+    <div>${escHtml(meta)} — Score d'exposition : ${escHtml(score)}</div>
+    ${content}
+  </body></html>`);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 300);
 }
 
 // ════════════════════════════════════════════
