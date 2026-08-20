@@ -701,6 +701,18 @@ select.form-input option{background:var(--surface)}
   color:var(--text-dim);
 }
 .argus-reco-item .sev-badge{flex-shrink:0}
+.argus-inline-badge{
+  display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:2px;
+  font-family:var(--font-mono);font-size:10px;
+}
+.argus-inline-badge.prospect{background:var(--amber-dim);border:1px solid rgba(255,170,0,.3);color:var(--amber)}
+.argus-inline-badge.existing{background:var(--green-dim);border:1px solid rgba(0,255,136,.25);color:var(--green)}
+.argus-prospect-banner{
+  display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;
+  background:var(--amber-dim);border:1px solid rgba(255,170,0,.3);border-radius:2px;
+  padding:12px 16px;margin-bottom:16px;font-family:var(--font-mono);font-size:11px;color:var(--amber);
+}
+.status-pill.prospect,.sev-badge.prospect-tag{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(255,170,0,.3)}
 
 /* ── RESPONSIVE ── */
 @media(max-width:900px){
@@ -1261,19 +1273,21 @@ select.form-input option{background:var(--surface)}
       <!-- ══ NOUVEAU SCAN — saisie société/domaine → orchestration complète → rapport ══
            Note d'implémentation (vérifié contre le backend réel avant d'écrire ce code) :
            la création de périmètre (`POST /api/argus/scope`) exige un `clientId` référençant
-           une ligne `clients` déjà existante — il n'existe aucune route pour créer un client
-           à la volée depuis un simple nom de société tapé au clavier. Le champ "Société"
-           ci-dessous est donc une saisie avec autocomplétion (`<datalist>`) contrainte à la
-           liste des clients déjà en base (même source que le sélecteur en haut de page) —
-           un nom qui ne correspond à aucun client existant est refusé avec un message clair,
-           plutôt que d'inventer un client fantôme. -->
+           une ligne `clients` déjà existante — voir POST /api/argus/prospect (backend,
+           commit à suivre) : un nom qui ne correspond à aucun client existant n'est PLUS
+           bloqué, il est proposé à la création automatique d'un client "prospect"
+           (status='prospect', voir badge dynamique ci-dessous) — le champ "Société"
+           ci-dessous garde son autocomplétion (`<datalist>`) sur les clients déjà en base
+           (même source que le sélecteur en haut de page) pour les cas où le client existe
+           déjà, mais accepte aussi une saisie libre. -->
       <div class="argus-scan-panel">
         <div class="card-title" style="margin:0 0 14px"><span class="dot" style="background:var(--cyan)"></span>Nouveau scan</div>
         <div class="argus-scan-form">
           <div class="form-group">
             <label class="form-label">Nom de la société</label>
-            <input class="form-input" id="argus-scan-company" list="argus-scan-company-list" placeholder="Ex. Cash Plus" autocomplete="off"/>
+            <input class="form-input" id="argus-scan-company" list="argus-scan-company-list" placeholder="Ex. Cash Plus" autocomplete="off" oninput="argusScanUpdateCompanyBadge()"/>
             <datalist id="argus-scan-company-list"></datalist>
+            <div id="argus-scan-company-badge" style="display:none;margin-top:6px"></div>
           </div>
           <div class="form-group">
             <label class="form-label">Domaine principal</label>
@@ -1302,6 +1316,7 @@ select.form-input option{background:var(--surface)}
             <button class="action-btn" onclick="argusExportScanReport()">🖨 Exporter le rapport</button>
           </div>
         </div>
+        <div id="argus-report-prospect-banner" style="display:none"></div>
         <div id="argus-report-content"></div>
       </div>
 
@@ -4197,8 +4212,16 @@ async function updateArgusExposureStatus(id, status) {
 //    GitHub est absorbé en interne par searchGithubLeaks (pause + poursuite,
 //    jamais propagé au client). En proxy honnête de "rate limit atteint", on
 //    affiche l'avertissement quand un asset scanné retourne scanned:0.
+//  - POST /api/argus/prospect (backend) crée/retrouve un client "prospect" par
+//    nom quand la société tapée ne correspond à aucun client déjà en base —
+//    plus de blocage sur une saisie libre (voir argusScanUpdateCompanyBadge/
+//    argusScanStart ci-dessous). Le backend distingue un prospect via
+//    `clients.status='prospect'` (pas de colonne `client_type` séparée — elle
+//    n'existe pas, `status` porte déjà cette distinction), d'où l'usage de
+//    `clientStatus` (alimenté depuis `client.status`, déjà renvoyé par
+//    GET /api/clients) plutôt que d'un `client_type` inexistant.
 
-const ARGUS_SCAN_STEPS = [
+const ARGUS_SCAN_STEPS_BASE = [
   { id: 'scope', label: 'Scope' },
   { id: 'approve', label: 'Approbation' },
   { id: 'scan', label: 'Scan passif' },
@@ -4206,14 +4229,25 @@ const ARGUS_SCAN_STEPS = [
   { id: 'github', label: 'GitHub Leaks' },
   { id: 'report', label: 'Rapport' },
 ];
+const ARGUS_PROSPECT_STEP = { id: 'prospect', label: 'Prospect' };
+let argusActiveScanSteps = ARGUS_SCAN_STEPS_BASE;
+let argusScanStepStates = {};
 let argusScanRunning = false;
 
-function argusScanRenderSteps(states) {
-  document.getElementById('argus-scan-steps').innerHTML = ARGUS_SCAN_STEPS.map((s, i) => {
-    const st = states[i] || 'pending';
+function argusScanRenderSteps() {
+  document.getElementById('argus-scan-steps').innerHTML = argusActiveScanSteps.map(s => {
+    const st = argusScanStepStates[s.id] || 'pending';
     const icon = st === 'done' ? '✓' : st === 'error' ? '✕' : st === 'warning' ? '!' : '';
     return `<div class="argus-scan-step ${st}"><span class="argus-step-icon">${icon}</span>${escHtml(s.label)}</div>`;
   }).join('');
+}
+function argusScanSetStep(id, state) {
+  argusScanStepStates[id] = state;
+  argusScanRenderSteps();
+}
+function argusScanMarkActiveAsError() {
+  for (const id in argusScanStepStates) if (argusScanStepStates[id] === 'active') argusScanStepStates[id] = 'error';
+  argusScanRenderSteps();
 }
 
 function argusScanSetStatus(msg, level) {
@@ -4261,6 +4295,25 @@ function argusConfidenceBadge(confidence) {
   return `<span class="sev-badge ${map[confidence] || 'info'}">${escHtml(confidence || '—')}</span>`;
 }
 
+// Badge live sous le champ "Société" : indique si la saisie correspond à un
+// client existant, ou sera créée comme prospect (POST /api/argus/prospect)
+// au lancement du scan — plus aucun blocage sur une société inconnue.
+let argusScanCacheLoading = null;
+async function argusScanUpdateCompanyBadge() {
+  const val = document.getElementById('argus-scan-company').value.trim();
+  const badgeEl = document.getElementById('argus-scan-company-badge');
+  if (!val) { badgeEl.style.display = 'none'; return; }
+  if (!argusClientsCache.length) {
+    if (!argusScanCacheLoading) argusScanCacheLoading = argusScanEnsureClientsCache();
+    await argusScanCacheLoading;
+  }
+  const match = argusClientsCache.find(c => c.name.toLowerCase() === val.toLowerCase());
+  badgeEl.style.display = '';
+  badgeEl.innerHTML = match
+    ? `<span class="argus-inline-badge existing">✓ Client existant</span>`
+    : `<span class="argus-inline-badge prospect">🔍 "${escHtml(val)}" — sera créé comme prospect</span>`;
+}
+
 async function argusScanStart() {
   if (argusScanRunning) return;
   const companyName = document.getElementById('argus-scan-company').value.trim();
@@ -4268,25 +4321,42 @@ async function argusScanStart() {
   if (!companyName || !domain) { showToast('⚠ Nom de la société et domaine requis'); return; }
 
   await argusScanEnsureClientsCache();
-  const client = argusClientsCache.find(c => c.name.toLowerCase() === companyName.toLowerCase());
-  if (!client) {
-    showToast("❌ Aucun client existant ne correspond à ce nom — sélectionnez-le dans la liste, ou créez-le d'abord (onglet Clients)");
-    return;
-  }
-  argusSelectedClientId = client.id;
-  const selectEl = document.getElementById('argus-client-select');
-  if (selectEl) selectEl.value = client.id;
+  let client = argusClientsCache.find(c => c.name.toLowerCase() === companyName.toLowerCase());
+  const needsProspectLookup = !client;
+
+  argusActiveScanSteps = needsProspectLookup ? [ARGUS_PROSPECT_STEP, ...ARGUS_SCAN_STEPS_BASE] : ARGUS_SCAN_STEPS_BASE;
+  argusScanStepStates = {};
+  argusActiveScanSteps.forEach(s => argusScanStepStates[s.id] = 'pending');
+  argusScanStepStates[argusActiveScanSteps[0].id] = 'active';
 
   argusScanRunning = true;
   document.getElementById('argus-scan-launch-btn').disabled = true;
   document.getElementById('argus-scan-progress').style.display = '';
   document.getElementById('argus-report').style.display = 'none';
-  const states = ARGUS_SCAN_STEPS.map(() => 'pending');
-  states[0] = 'active';
-  argusScanRenderSteps(states);
-  argusScanSetStatus('Création / vérification du périmètre...');
+  argusScanRenderSteps();
+  argusScanSetStatus(needsProspectLookup ? 'Création / recherche du prospect...' : 'Création / vérification du périmètre...');
 
+  let clientStatus = client?.status || 'active';
   try {
+    // ── ÉTAPE 0 (conditionnelle) — société inconnue en base : POST /api/argus/prospect
+    // crée (ou retrouve par nom) un client status='prospect' pour pouvoir scanner.
+    if (needsProspectLookup) {
+      const prospectRes = await argusScanFetch('/argus/prospect', {
+        method: 'POST', body: JSON.stringify({ company_name: companyName, domain }),
+      });
+      if (!prospectRes.ok) throw new Error(prospectRes.data?.error || `Échec création/recherche du prospect (HTTP ${prospectRes.status})`);
+      const p = prospectRes.data;
+      client = { id: p.clientId, name: companyName, status: p.status };
+      clientStatus = p.status;
+      argusScanSetStatus(p.created ? '✅ Prospect créé.' : 'ℹ Client existant trouvé.');
+      argusScanSetStep('prospect', 'done');
+      argusScanSetStep('scope', 'active');
+    }
+    argusSelectedClientId = client.id;
+    const selectEl = document.getElementById('argus-client-select');
+    if (selectEl) selectEl.value = client.id;
+    if (!needsProspectLookup) argusScanSetStatus('Création / vérification du périmètre...');
+
     // ── ÉTAPE 1 — scope (POST /api/argus/scope, ajout manuel — voir note en tête de section)
     let scopeId, scopeRow;
     const scopeRes = await argusScanFetch('/argus/scope', {
@@ -4303,7 +4373,7 @@ async function argusScanStart() {
     } else {
       throw new Error(scopeRes.data?.error || `Échec création du périmètre (HTTP ${scopeRes.status})`);
     }
-    states[0] = 'done'; states[1] = 'active'; argusScanRenderSteps(states);
+    argusScanSetStep('scope', 'done'); argusScanSetStep('approve', 'active');
     argusScanSetStatus('Approbation du périmètre...');
 
     // ── ÉTAPE 2 — approbation (skip si déjà approuvé — cas du scope récupéré ci-dessus)
@@ -4311,20 +4381,20 @@ async function argusScanStart() {
       const approveRes = await argusScanFetch(`/argus/scope/${scopeId}/approve`, { method: 'PATCH' });
       if (!approveRes.ok) throw new Error(approveRes.data?.error || `Échec approbation (HTTP ${approveRes.status})`);
     }
-    states[1] = 'done'; states[2] = 'active'; argusScanRenderSteps(states);
+    argusScanSetStep('approve', 'done'); argusScanSetStep('scan', 'active');
     argusScanSetStatus('Scan passif — DNS, certificats TLS, headers HTTP, corrélation CVE...');
 
     // ── ÉTAPE 3 — scan passif complet
     const scanRes = await argusScanFetch(`/argus/scan/${scopeId}`, { method: 'POST' });
     if (!scanRes.ok) throw new Error(scanRes.data?.error || `Échec scan passif (HTTP ${scanRes.status})`);
-    states[2] = 'done'; states[3] = 'active'; argusScanRenderSteps(states);
+    argusScanSetStep('scan', 'done'); argusScanSetStep('assets', 'active');
     argusScanSetStatus('Récupération des actifs découverts...');
 
     // ── ÉTAPE 4 — assets du scope
     const assetsRes = await argusScanFetch(`/argus/assets?clientId=${client.id}&scopeId=${scopeId}`);
     if (!assetsRes.ok) throw new Error(assetsRes.data?.error || `Échec récupération des actifs (HTTP ${assetsRes.status})`);
     const assets = assetsRes.data?.data || [];
-    states[3] = 'done'; states[4] = 'active'; argusScanRenderSteps(states);
+    argusScanSetStep('assets', 'done'); argusScanSetStep('github', 'active');
 
     // ── ÉTAPE 5 — GitHub Leak Scan sur 3 actifs uniques max (dédupliqués par asset_value)
     const uniqueAssetValues = [...new Map(assets.map(a => [a.asset_value, a])).values()];
@@ -4339,13 +4409,13 @@ async function argusScanStart() {
       );
       const configMissing = results.some(r => r.status === 'fulfilled' && r.value.status === 503);
       const rateLimited = results.some(r => r.status === 'fulfilled' && r.value.ok && (r.value.data?.data?.scanned ?? 0) === 0);
-      if (configMissing) { githubWarning = 'Scan GitHub Leaks indisponible (clé API GitHub non configurée côté serveur).'; states[4] = 'warning'; }
-      else if (rateLimited) { githubWarning = 'Rate limit GitHub atteint — findings partiels.'; states[4] = 'warning'; }
-      else { states[4] = 'done'; }
+      if (configMissing) { githubWarning = 'Scan GitHub Leaks indisponible (clé API GitHub non configurée côté serveur).'; argusScanSetStep('github', 'warning'); }
+      else if (rateLimited) { githubWarning = 'Rate limit GitHub atteint — findings partiels.'; argusScanSetStep('github', 'warning'); }
+      else { argusScanSetStep('github', 'done'); }
     } else {
-      states[4] = 'done'; // aucun actif à scanner — pas une erreur
+      argusScanSetStep('github', 'done'); // aucun actif à scanner — pas une erreur
     }
-    states[5] = 'active'; argusScanRenderSteps(states);
+    argusScanSetStep('report', 'active');
     argusScanSetStatus(githubWarning ? '⚠ ' + githubWarning : 'Génération du rapport...', githubWarning ? 'warning' : null);
 
     // ── ÉTAPE 6 — findings GitHub + résumé d'exposition + expositions CVE des actifs de ce scope
@@ -4359,13 +4429,13 @@ async function argusScanStart() {
     const assetIds = new Set(assets.map(a => a.id));
     const exposures = (exposuresRes.data?.data || []).filter(e => assetIds.has(e.asset_id));
 
-    states[5] = 'done'; argusScanRenderSteps(states);
+    argusScanSetStep('report', 'done');
     argusScanSetStatus(githubWarning ? '⚠ Scan terminé avec avertissement — ' + githubWarning : '✅ Scan terminé.', githubWarning ? 'warning' : null);
 
-    argusRenderScanReport({ companyName: client.name, domain, scopeId, assets, exposures, findings, summary });
+    argusRenderScanReport({ companyName: client.name, domain, scopeId, assets, exposures, findings, summary, clientStatus });
     loadArgusScope(); loadArgusAssets(); loadArgusExposures(); loadArgusSummary();
   } catch (e) {
-    argusScanRenderSteps(states.map(s => s === 'active' ? 'error' : s));
+    argusScanMarkActiveAsError();
     argusScanSetStatus('❌ ' + e.message, 'error');
     showToast('❌ ' + e.message);
   } finally {
@@ -4374,7 +4444,7 @@ async function argusScanStart() {
   }
 }
 
-function argusRenderScanReport({ companyName, domain, assets, exposures, findings, summary }) {
+function argusRenderScanReport({ companyName, domain, assets, exposures, findings, summary, clientStatus }) {
   const assetsById = new Map(assets.map(a => [a.id, a]));
   const groups = new Map();
   for (const a of assets) {
@@ -4442,6 +4512,24 @@ function argusRenderScanReport({ companyName, domain, assets, exposures, finding
   document.getElementById('argus-report-title').textContent = `${companyName} — ${domain}`;
   document.getElementById('argus-report-meta').textContent = `Scan effectué le ${new Date().toLocaleString('fr-FR')}`;
   document.getElementById('argus-report-score-val').textContent = summary?.currentScore ?? '—';
+
+  // clientStatus vient de client.status (déjà renvoyé par GET /api/clients et par
+  // POST /api/argus/prospect) — pas de colonne client_type séparée, voir note en tête
+  // de section : status='prospect' porte déjà cette distinction côté backend.
+  const bannerEl = document.getElementById('argus-report-prospect-banner');
+  if (clientStatus === 'prospect') {
+    bannerEl.style.display = '';
+    bannerEl.innerHTML = `<div class="argus-prospect-banner">
+      <span>⚠ Ce rapport concerne un prospect — aucun contrat actif.</span>
+      <div style="display:flex;gap:8px">
+        <button class="action-btn" onclick="showToast('ℹ Contact prospect — à faire depuis l\\'onglet Clients')">Contacter</button>
+        <button class="action-btn primary" onclick="showToast('ℹ Création de mission — à faire depuis l\\'onglet Missions')">Créer mission</button>
+      </div>
+    </div>`;
+  } else {
+    bannerEl.style.display = 'none';
+    bannerEl.innerHTML = '';
+  }
   document.getElementById('argus-report-content').innerHTML = `
     <div class="argus-report-section">
       <h4>Surface d'attaque — actifs découverts</h4>
