@@ -393,6 +393,24 @@ table.data-table tr:hover td{background:rgba(0,180,220,.03)}
 .status-pill.draft,.status-pill.waiting_approval{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(255,170,0,.25)}
 .status-pill.running{background:var(--cyan-dim);color:var(--cyan);border:1px solid rgba(0,180,220,.25)}
 .status-pill.failed{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,45,85,.25)}
+/* ── ARGUS — scope/asset/exposure status ── */
+.status-pill.pending_validation{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(255,170,0,.25)}
+.status-pill.approved{background:var(--green-dim);color:var(--green);border:1px solid rgba(0,255,136,.25)}
+.status-pill.rejected{background:rgba(120,130,140,.12);color:var(--text-dim);border:1px solid rgba(120,130,140,.25)}
+.status-pill.acknowledged{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(255,170,0,.25)}
+.status-pill.remediated{background:var(--green-dim);color:var(--green);border:1px solid rgba(0,255,136,.25)}
+.status-pill.false_positive{background:rgba(120,130,140,.12);color:var(--text-dim);border:1px solid rgba(120,130,140,.25)}
+.status-pill.stale,.status-pill.removed{background:rgba(120,130,140,.12);color:var(--text-dim);border:1px solid rgba(120,130,140,.25)}
+
+/* ── SOC correlation badge (ARGUS) — l'info la plus critique du module, mise en évidence forte ── */
+.soc-corr-badge{
+  display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:2px;
+  font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  background:var(--red-dim);color:var(--red);border:1px solid rgba(255,45,85,.5);
+  animation:socCorrPulse 1.6s infinite;
+}
+.soc-corr-badge::before{content:'⚠';font-size:12px}
+@keyframes socCorrPulse{0%,100%{box-shadow:0 0 0 0 rgba(255,45,85,.35)}50%{box-shadow:0 0 0 6px rgba(255,45,85,0)}}
 
 /* ── PROGRESS BARS ── */
 .progress-row{margin-bottom:14px}
@@ -692,6 +710,7 @@ select.form-input option{background:var(--surface)}
       <div class="tb-btn" onclick="nav('cases')" data-page="cases"><span class="tb-icon">🗂</span><span>Cases</span></div>
       <div class="tb-btn" onclick="nav('automation')" data-page="automation"><span class="tb-icon">⚡</span><span>Automation</span></div>
       <div class="tb-btn" onclick="nav('atlas')" data-page="atlas"><span class="tb-icon">🗺</span><span>ATLAS</span></div>
+      <div class="tb-btn" onclick="nav('argus')" data-page="argus"><span class="tb-icon">🎯</span><span>Exposition</span></div>
       <div class="tb-btn" onclick="nav('chronicle')" data-page="chronicle"><span class="tb-icon">📜</span><span>Chronicle</span></div>
       <div class="tb-btn" onclick="nav('reports')" data-page="reports"><span class="tb-icon">▦</span><span>Rapports</span></div>
       <div class="tb-btn" onclick="nav('services')" data-page="services"><span class="tb-icon">◈</span><span>Services</span></div>
@@ -1169,6 +1188,84 @@ select.form-input option{background:var(--surface)}
       </div>
     </div>
 
+    <!-- ══ ARGUS (Attack Surface Management) ══ -->
+    <div class="page" id="page-argus">
+      <div class="section-header">
+        <div><div class="section-title">ARGUS — Attack Surface Management</div><div class="section-sub" id="argus-sub">Reconnaissance passive, corrélation CVE &amp; corrélation SOC — Pôle AEGIS</div></div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <select class="form-input" id="argus-client-select" style="display:none;min-width:220px" onchange="onArgusClientChange()"></select>
+          <button class="action-btn" onclick="loadArgusPage()">↺ Actualiser</button>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card cyan">
+          <div class="stat-label-top">Score d'exposition</div>
+          <div class="stat-val cyan" id="argus-stat-score">—</div>
+          <div class="stat-sub" id="argus-stat-trend">tendance vs. snapshot précédent</div>
+        </div>
+        <div class="stat-card red">
+          <div class="stat-label-top">Expositions ouvertes</div>
+          <div class="stat-val red" id="argus-stat-open">—</div>
+          <div class="stat-sub">status = open</div>
+        </div>
+        <div class="stat-card amber">
+          <div class="stat-label-top">Critiques</div>
+          <div class="stat-val amber" id="argus-stat-critical">—</div>
+          <div class="stat-sub">CVSS ≥ 9.0</div>
+        </div>
+        <div class="stat-card" id="argus-stat-soc-card">
+          <div class="stat-label-top">Corrélées SOC</div>
+          <div class="stat-val" id="argus-stat-soc" style="color:var(--red)">—</div>
+          <div class="stat-sub">probablement déjà exploitées</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:20px">
+        <div class="section-header" style="margin-bottom:14px">
+          <div class="card-title" style="margin:0"><span class="dot" style="background:var(--cyan)"></span>Périmètre (scope)</div>
+          <div style="display:flex;gap:10px" id="argus-scope-actions">
+            <button class="action-btn" onclick="suggestArgusScope()">Suggérer</button>
+            <button class="action-btn primary" onclick="openArgusScopeAddModal()">+ Ajouter manuellement</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table class="data-table" id="argus-scope-table">
+          <thead><tr><th>Actif</th><th>Type</th><th>Source</th><th>Statut</th><th></th></tr></thead>
+          <tbody id="argus-scope-tbody"><tr><td colspan="5" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+        </table></div>
+      </div>
+
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Actifs découverts</div>
+        <div class="table-wrap"><table class="data-table" id="argus-assets-table">
+          <thead><tr><th>Valeur</th><th>Type</th><th>Dernière vue</th><th>Statut</th></tr></thead>
+          <tbody id="argus-assets-tbody"><tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <div class="section-header" style="margin-bottom:14px">
+          <div class="card-title" style="margin:0"><span class="dot" style="background:var(--cyan)"></span>Expositions</div>
+          <div style="display:flex;gap:10px">
+            <select class="form-input" id="argus-exp-f-status" onchange="loadArgusExposures()" style="width:auto">
+              <option value="">Tous statuts</option>
+              <option value="open">Open</option><option value="acknowledged">Acknowledged</option>
+              <option value="remediated">Remediated</option><option value="false_positive">False positive</option>
+            </select>
+            <select class="form-input" id="argus-exp-f-severity" onchange="loadArgusExposures()" style="width:auto">
+              <option value="">Toutes sévérités</option>
+              <option value="critical">Critical</option><option value="high">High</option>
+              <option value="medium">Medium</option><option value="low">Low</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrap"><table class="data-table" id="argus-exposures-table">
+          <thead><tr><th>CVE</th><th>Service / Version</th><th>CVSS</th><th>Score</th><th>Statut</th><th>Corrélation SOC</th><th></th></tr></thead>
+          <tbody id="argus-exposures-tbody"><tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
     <!-- ══ CHRONICLE ══ -->
     <div class="page" id="page-chronicle">
       <div class="section-header">
@@ -1597,6 +1694,7 @@ function nav(page) {
   if (page === 'cases') loadCases();
   if (page === 'automation') { loadWorkflows(); loadExecutions(); }
   if (page === 'atlas') { loadThreatActors(); loadCampaigns(); loadStrategicReports(); }
+  if (page === 'argus') loadArgusPage();
   if (page === 'chronicle') loadChronicle();
   if (page === 'augur') loadAugur();
   if (page === 'threatintel') loadThreatIntel();
@@ -3676,6 +3774,300 @@ async function openStrategicReportDetail(id) {
     </div>
   `;
   document.body.appendChild(modal);
+}
+
+// ════════════════════════════════════════════
+// ARGUS — Attack Surface Management (Pôle AEGIS)
+// ════════════════════════════════════════════
+let argusClientsCache = [];
+let argusSelectedClientId = '';
+let argusScopeList = [];
+let argusAssetsList = [];
+let argusExposuresList = [];
+
+// `GET /api/argus/*` exige un tenant résolu côté serveur (resolveTenantScope) :
+// automatique pour le rôle 'client' (son propre tenant), mais admin/analyst
+// doivent fournir ?clientId= explicitement (sinon liste vide, par design côté
+// backend — voir docs/argus.md). D'où ce sélecteur de client persistant.
+function argusClientParam() {
+  if (currentUser?.role === 'client') return '';
+  return argusSelectedClientId ? `clientId=${argusSelectedClientId}` : '';
+}
+function argusCanManage() { return ['admin', 'analyst'].includes(currentUser?.role); }
+
+async function loadArgusPage() {
+  const selectEl = document.getElementById('argus-client-select');
+  if (argusCanManage()) {
+    if (!argusClientsCache.length) {
+      const res = await apiCall('/clients?limit=100');
+      argusClientsCache = res?.data || [];
+    }
+    selectEl.style.display = '';
+    selectEl.innerHTML = `<option value="">— Sélectionner un client —</option>${argusClientsCache.map(c => `<option value="${c.id}" ${c.id === argusSelectedClientId ? 'selected' : ''}>${escHtml(c.name)}</option>`).join('')}`;
+    if (!argusSelectedClientId) {
+      document.getElementById('argus-scope-tbody').innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Sélectionnez un client ci-dessus</td></tr>`;
+      document.getElementById('argus-assets-tbody').innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">—</td></tr>`;
+      document.getElementById('argus-exposures-tbody').innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">—</td></tr>`;
+      resetArgusSummary();
+      return;
+    }
+  } else {
+    selectEl.style.display = 'none';
+  }
+  loadArgusSummary();
+  loadArgusScope();
+  loadArgusAssets();
+  loadArgusExposures();
+}
+
+function onArgusClientChange() {
+  argusSelectedClientId = document.getElementById('argus-client-select').value;
+  loadArgusPage();
+}
+
+function resetArgusSummary() {
+  document.getElementById('argus-stat-score').textContent = '—';
+  document.getElementById('argus-stat-trend').textContent = 'tendance vs. snapshot précédent';
+  document.getElementById('argus-stat-open').textContent = '—';
+  document.getElementById('argus-stat-critical').textContent = '—';
+  document.getElementById('argus-stat-soc').textContent = '—';
+}
+
+async function loadArgusSummary() {
+  const qs = argusClientParam();
+  const res = await apiCall(`/argus/summary${qs ? '?' + qs : ''}`);
+  if (!res || !res.data) { resetArgusSummary(); return; }
+  const s = res.data;
+
+  document.getElementById('argus-stat-score').textContent = s.currentScore ?? '—';
+  const trend = s.trend || {};
+  const trendLabel = trend.direction === 'up' ? `▲ +${trend.delta}` : trend.direction === 'down' ? `▼ ${trend.delta}` : trend.direction === 'stable' ? '● stable' : 'pas de snapshot précédent';
+  document.getElementById('argus-stat-trend').textContent = trendLabel;
+  document.getElementById('argus-stat-open').textContent = s.byStatus?.open ?? 0;
+  document.getElementById('argus-stat-critical').textContent = s.bySeverity?.critical ?? 0;
+}
+
+async function loadArgusScope() {
+  const qs = argusClientParam();
+  const res = await apiCall(`/argus/scope${qs ? '?' + qs : ''}`);
+  const tbody = document.getElementById('argus-scope-tbody');
+  document.getElementById('argus-scope-actions').style.display = argusCanManage() ? '' : 'none';
+  if (!res) {
+    argusScopeList = [];
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune donnée — accès insuffisant ou erreur réseau</td></tr>`;
+    return;
+  }
+  argusScopeList = res.data || [];
+  renderArgusScopeTable();
+}
+
+function renderArgusScopeTable() {
+  const tbody = document.getElementById('argus-scope-tbody');
+  if (!argusScopeList.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun périmètre — suggérez-en un ou ajoutez-le manuellement</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  argusScopeList.forEach(s => {
+    const tr = document.createElement('tr');
+    let actions = '—';
+    if (argusCanManage()) {
+      if (s.status === 'pending_validation') {
+        actions = `<button class="action-btn primary" onclick="approveArgusScope('${s.id}')">Approuver</button>
+                   <button class="action-btn" onclick="rejectArgusScope('${s.id}')">Rejeter</button>`;
+      } else if (s.status === 'approved') {
+        actions = `<button class="action-btn" onclick="launchArgusScan('${s.id}','${escHtml(s.asset_value)}')">▶ Lancer un scan</button>`;
+      }
+    }
+    tr.innerHTML = `
+      <td style="font-weight:600;color:var(--text-bright)">${escHtml(s.asset_value)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(s.asset_type)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(s.source)}</td>
+      <td><span class="status-pill ${s.status}">${s.status}</span></td>
+      <td style="display:flex;gap:8px">${actions}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function suggestArgusScope() {
+  if (!argusSelectedClientId && currentUser?.role !== 'client') { showToast('⚠ Sélectionnez un client'); return; }
+  const res = await apiCall('/argus/scope/suggest', { method: 'POST', body: JSON.stringify({ clientId: argusSelectedClientId }) });
+  if (!res) { showToast('❌ Erreur lors de la suggestion'); return; }
+  const count = res.data?.suggestions?.length || 0;
+  showToast(count ? `✅ ${count} suggestion(s) ajoutée(s)` : `ℹ ${res.data?.message || 'Aucune suggestion exploitable'}`);
+  loadArgusScope();
+}
+
+function openArgusScopeAddModal() {
+  const modal = document.createElement('div');
+  modal.id = 'asm-overlay';
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;
+  `;
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;
+                max-width:480px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="document.getElementById('asm-overlay')?.remove()"
+        style="position:absolute;top:16px;right:16px;background:none;border:none;
+               color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:24px">AJOUTER UN PÉRIMÈTRE</div>
+
+      <div class="form-group"><label class="form-label">Valeur (domaine, IP, plage CIDR)</label>
+        <input class="form-input" id="asm-value" placeholder="Ex: exemple-client.ma"/></div>
+      <div class="form-group"><label class="form-label">Type</label>
+        <select class="form-input" id="asm-type">
+          <option value="domain">domain</option><option value="ip">ip</option><option value="cidr_range">cidr_range</option>
+        </select></div>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:20px;margin-top:8px">
+        <button class="action-btn" onclick="document.getElementById('asm-overlay')?.remove()">Annuler</button>
+        <button class="action-btn primary" onclick="submitArgusScopeAdd()">Ajouter</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+async function submitArgusScopeAdd() {
+  if (!argusSelectedClientId) { showToast('⚠ Sélectionnez un client'); return; }
+  const assetValue = document.getElementById('asm-value').value.trim();
+  const assetType = document.getElementById('asm-type').value;
+  if (!assetValue) { showToast('⚠ Valeur requise'); return; }
+
+  const res = await apiCall('/argus/scope', { method: 'POST', body: JSON.stringify({ clientId: argusSelectedClientId, assetValue, assetType }) });
+  if (!res) { showToast('❌ Erreur ajout du périmètre (déjà existant ?)'); return; }
+  showToast('✅ Périmètre ajouté — en attente de validation');
+  document.getElementById('asm-overlay')?.remove();
+  loadArgusScope();
+}
+
+async function approveArgusScope(id) {
+  const res = await apiCall(`/argus/scope/${id}/approve`, { method: 'PATCH' });
+  if (!res) { showToast('❌ Erreur approbation'); return; }
+  showToast('✅ Périmètre approuvé — scannable');
+  loadArgusScope();
+}
+
+async function rejectArgusScope(id) {
+  const reason = prompt('Raison du rejet (optionnel) :') || null;
+  const res = await apiCall(`/argus/scope/${id}/reject`, { method: 'PATCH', body: JSON.stringify({ reason }) });
+  if (!res) { showToast('❌ Erreur rejet'); return; }
+  showToast('✅ Périmètre rejeté');
+  loadArgusScope();
+}
+
+async function launchArgusScan(scopeId, assetValue) {
+  if (!confirm(`Lancer un scan réseau réel (DNS/TLS/HTTP) sur "${assetValue}" ?\n\nCette action envoie des requêtes vers l'infrastructure du client — reconnaissance strictement passive, mais action sensible à confirmer explicitement.`)) return;
+  showToast('▶ Scan en cours...');
+  const res = await apiCall(`/argus/scan/${scopeId}`, { method: 'POST' });
+  if (!res) { showToast('❌ Erreur lors du scan'); return; }
+  const s = res.data || {};
+  showToast(`✅ Scan terminé — ${s.subdomainsDiscovered || 0} sous-domaine(s), ${s.certificatesChecked || 0} certificat(s), ${s.headersChecked || 0} header(s)${s.errors?.length ? `, ${s.errors.length} erreur(s)` : ''}`);
+  loadArgusAssets();
+  loadArgusExposures();
+  loadArgusSummary();
+}
+
+async function loadArgusAssets() {
+  const qs = argusClientParam();
+  const res = await apiCall(`/argus/assets${qs ? '?' + qs : ''}`);
+  const tbody = document.getElementById('argus-assets-tbody');
+  if (!res) {
+    argusAssetsList = [];
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune donnée — accès insuffisant ou erreur réseau</td></tr>`;
+    return;
+  }
+  argusAssetsList = res.data || [];
+  renderArgusAssetsTable();
+}
+
+function renderArgusAssetsTable() {
+  const tbody = document.getElementById('argus-assets-tbody');
+  if (!argusAssetsList.length) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun actif découvert — lancez un scan sur un périmètre approuvé</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  argusAssetsList.forEach(a => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-weight:600;color:var(--text-bright)">${escHtml(a.asset_value)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(a.asset_kind)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${a.last_seen ? new Date(a.last_seen).toLocaleString('fr-FR') : '—'}</td>
+      <td><span class="status-pill ${a.status}">${a.status}</span></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function loadArgusExposures() {
+  const status = document.getElementById('argus-exp-f-status')?.value || '';
+  const severity = document.getElementById('argus-exp-f-severity')?.value || '';
+  const parts = [argusClientParam()].filter(Boolean);
+  if (status) parts.push(`status=${status}`);
+  if (severity) parts.push(`severity=${severity}`);
+
+  const res = await apiCall(`/argus/exposures${parts.length ? '?' + parts.join('&') : ''}`);
+  const tbody = document.getElementById('argus-exposures-tbody');
+  if (!res) {
+    argusExposuresList = [];
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune donnée — accès insuffisant ou erreur réseau</td></tr>`;
+    return;
+  }
+  argusExposuresList = res.data || [];
+  renderArgusExposuresTable();
+  document.getElementById('argus-stat-soc').textContent = argusExposuresList.filter(e => e.soc_correlated).length;
+}
+
+function argusCvssSevBadge(score) {
+  if (score === null || score === undefined) return '<span style="color:var(--text-dim);font-family:var(--font-mono);font-size:11px">—</span>';
+  const n = Number(score);
+  const sev = n >= 9 ? 'critical' : n >= 7 ? 'high' : n >= 4 ? 'medium' : 'low';
+  return `<span class="sev-badge ${sev}">${n.toFixed(1)}</span>`;
+}
+
+function renderArgusExposuresTable() {
+  const tbody = document.getElementById('argus-exposures-tbody');
+  if (!argusExposuresList.length) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune exposition</td></tr>`;
+    return;
+  }
+  // Les expositions corrélées SOC (probablement exploitées) remontent en premier —
+  // c'est l'information la plus critique du module.
+  const sorted = [...argusExposuresList].sort((a, b) => (b.soc_correlated ? 1 : 0) - (a.soc_correlated ? 1 : 0));
+
+  tbody.innerHTML = '';
+  sorted.forEach(e => {
+    const tr = document.createElement('tr');
+    if (e.soc_correlated) tr.style.background = 'rgba(255,45,85,.05)';
+
+    const nextStatus = { open: 'acknowledged', acknowledged: 'remediated' }[e.status] || null;
+    let actions = '';
+    if (argusCanManage()) {
+      if (nextStatus) actions += `<button class="action-btn" onclick="updateArgusExposureStatus('${e.id}','${nextStatus}')">→ ${nextStatus}</button>`;
+      if (['open', 'acknowledged'].includes(e.status)) actions += `<button class="action-btn" onclick="updateArgusExposureStatus('${e.id}','false_positive')">Faux positif</button>`;
+    }
+
+    tr.innerHTML = `
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-bright)">${escHtml(e.cve_id || '—')}</td>
+      <td style="font-size:12px;color:var(--text-dim)">${escHtml(e.detected_service || '—')}${e.detected_version ? ' ' + escHtml(e.detected_version) : ''}</td>
+      <td>${argusCvssSevBadge(e.cvss_score)}</td>
+      <td style="font-family:var(--font-mono);font-size:12px;color:var(--text-bright)">${e.exposure_score ?? '—'}</td>
+      <td><span class="status-pill ${e.status}">${e.status}</span></td>
+      <td>${e.soc_correlated ? `<span class="soc-corr-badge" title="Activité SOC (alerte/corrélation HUNTER) détectée sur cet actif — probablement déjà exploitée">Exploitation probable</span>` : '<span style="color:var(--text-dim);font-family:var(--font-mono);font-size:10px">—</span>'}</td>
+      <td style="display:flex;gap:8px;flex-wrap:wrap">${actions}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function updateArgusExposureStatus(id, status) {
+  const res = await apiCall(`/argus/exposures/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+  if (!res) { showToast('❌ Erreur changement de statut'); return; }
+  showToast(`✅ Exposition → ${status}`);
+  loadArgusExposures();
+  loadArgusSummary();
 }
 
 // ════════════════════════════════════════════
