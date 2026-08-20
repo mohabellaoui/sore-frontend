@@ -4230,6 +4230,15 @@ const ARGUS_SCAN_STEPS_BASE = [
   { id: 'report', label: 'Rapport' },
 ];
 const ARGUS_PROSPECT_STEP = { id: 'prospect', label: 'Prospect' };
+// Rotation toutes les 10s pendant l'attente du scan GitHub Leaks (48-90s réels côté
+// backend, 12 dork queries × 4s de throttle) — évite que l'utilisateur pense que
+// c'est bloqué pendant une attente longue mais normale.
+const ARGUS_GITHUB_SCAN_MESSAGES = [
+  'Analyse des repos publics...',
+  'Recherche credentials exposés...',
+  'Vérification API keys...',
+  'Finalisation...',
+];
 let argusActiveScanSteps = ARGUS_SCAN_STEPS_BASE;
 let argusScanStepStates = {};
 let argusScanRunning = false;
@@ -4261,10 +4270,15 @@ function argusScanSetStatus(msg, level) {
  * et le corps de la réponse en cas d'erreur (`return res.ok ? res.json() : null`)
  * et est donc inutilisable ici : la gestion d'erreurs demandée dépend
  * explicitement du status HTTP réel (400 "déjà enregistré", 503 clé GitHub
- * absente, timeout > 15s pour un cold start Render...). Timeout 15s, un seul
- * retry automatique avec un délai plus long (60s) sur timeout, comme demandé.
+ * absente, timeout > 15s pour un cold start Render...). Timeout 15s par
+ * défaut, un seul retry automatique avec un délai plus long (60s) sur
+ * timeout — sauf si `retryOnTimeout` est explicitement à `false` (cas du
+ * scan GitHub Leaks ci-dessous : un timeout de 120s qui expire n'est pas un
+ * cold start, retenter ne ferait que doubler l'attente avant l'échec final).
+ * `AbortSignal.timeout()` plutôt qu'un AbortController manuel : équivalent
+ * fonctionnel, déjà le pattern utilisé partout ailleurs dans ce fichier.
  */
-async function argusScanFetch(path, options = {}, timeoutMs = 15000, isRetry = false) {
+async function argusScanFetch(path, options = {}, timeoutMs = 15000, retryOnTimeout = true, isRetry = false) {
   const headers = { 'Content-Type': 'application/json', ...options.headers };
   if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
   try {
@@ -4273,11 +4287,12 @@ async function argusScanFetch(path, options = {}, timeoutMs = 15000, isRetry = f
     try { data = await res.json(); } catch { /* réponse sans corps JSON exploitable */ }
     return { ok: res.ok, status: res.status, data };
   } catch (e) {
-    if (e.name === 'TimeoutError' && !isRetry) {
+    const timedOut = e.name === 'TimeoutError';
+    if (timedOut && retryOnTimeout && !isRetry) {
       argusScanSetStatus('⏳ Démarrage du serveur... (plan gratuit, 30-60s) — nouvelle tentative...', 'warning');
-      return argusScanFetch(path, options, 60000, true);
+      return argusScanFetch(path, options, 60000, retryOnTimeout, true);
     }
-    return { ok: false, status: 0, data: null, networkError: true };
+    return { ok: false, status: 0, data: null, networkError: true, timedOut };
   }
 }
 
@@ -4397,19 +4412,39 @@ async function argusScanStart() {
     argusScanSetStep('assets', 'done'); argusScanSetStep('github', 'active');
 
     // ── ÉTAPE 5 — GitHub Leak Scan sur 3 actifs uniques max (dédupliqués par asset_value)
+    // Timeout 120s par asset (pas les 15s par défaut) : le backend enchaîne ~12 dork
+    // queries à 4s de throttle chacune (48-90s réels) — un timeout court annule le
+    // fetch bien avant que le backend ait fini de répondre. Pas de retry-on-timeout
+    // ici (retryOnTimeout=false) : passé 120s ce n'est pas un cold start, retenter
+    // ferait juste doubler l'attente avant l'échec.
     const uniqueAssetValues = [...new Map(assets.map(a => [a.asset_value, a])).values()];
     const githubTargets = uniqueAssetValues.slice(0, 3);
     let githubWarning = null;
+    const githubTimedOutAssets = [];
     if (githubTargets.length) {
-      argusScanSetStatus(`Scan GitHub Leaks sur ${githubTargets.length} actif(s)...`);
-      const results = await Promise.allSettled(
-        githubTargets.map(a => argusScanFetch('/argus/scan/github-leaks', {
-          method: 'POST', body: JSON.stringify({ scopeId, assetId: a.id }),
-        }))
-      );
+      let msgIndex = 0;
+      argusScanSetStatus(ARGUS_GITHUB_SCAN_MESSAGES[0]);
+      const rotateMsg = setInterval(() => {
+        msgIndex = (msgIndex + 1) % ARGUS_GITHUB_SCAN_MESSAGES.length;
+        argusScanSetStatus(ARGUS_GITHUB_SCAN_MESSAGES[msgIndex]);
+      }, 10000);
+      let results;
+      try {
+        results = await Promise.allSettled(
+          githubTargets.map(a => argusScanFetch('/argus/scan/github-leaks', {
+            method: 'POST', body: JSON.stringify({ scopeId, assetId: a.id }),
+          }, 120000, false))
+        );
+      } finally {
+        clearInterval(rotateMsg);
+      }
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled' && !r.value.ok && r.value.timedOut) githubTimedOutAssets.push(githubTargets[i].asset_value);
+      });
       const configMissing = results.some(r => r.status === 'fulfilled' && r.value.status === 503);
       const rateLimited = results.some(r => r.status === 'fulfilled' && r.value.ok && (r.value.data?.data?.scanned ?? 0) === 0);
       if (configMissing) { githubWarning = 'Scan GitHub Leaks indisponible (clé API GitHub non configurée côté serveur).'; argusScanSetStep('github', 'warning'); }
+      else if (githubTimedOutAssets.length) { githubWarning = `Scan GitHub interrompu (timeout 120s) sur ${githubTimedOutAssets.length} actif(s) — findings partiels.`; argusScanSetStep('github', 'warning'); }
       else if (rateLimited) { githubWarning = 'Rate limit GitHub atteint — findings partiels.'; argusScanSetStep('github', 'warning'); }
       else { argusScanSetStep('github', 'done'); }
     } else {
@@ -4432,7 +4467,7 @@ async function argusScanStart() {
     argusScanSetStep('report', 'done');
     argusScanSetStatus(githubWarning ? '⚠ Scan terminé avec avertissement — ' + githubWarning : '✅ Scan terminé.', githubWarning ? 'warning' : null);
 
-    argusRenderScanReport({ companyName: client.name, domain, scopeId, assets, exposures, findings, summary, clientStatus });
+    argusRenderScanReport({ companyName: client.name, domain, scopeId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets });
     loadArgusScope(); loadArgusAssets(); loadArgusExposures(); loadArgusSummary();
   } catch (e) {
     argusScanMarkActiveAsError();
@@ -4444,7 +4479,7 @@ async function argusScanStart() {
   }
 }
 
-function argusRenderScanReport({ companyName, domain, assets, exposures, findings, summary, clientStatus }) {
+function argusRenderScanReport({ companyName, domain, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets = [] }) {
   const assetsById = new Map(assets.map(a => [a.id, a]));
   const groups = new Map();
   for (const a of assets) {
@@ -4498,6 +4533,9 @@ function argusRenderScanReport({ companyName, domain, assets, exposures, finding
       </table></div>
       <div class="argus-report-note">Les valeurs sensibles ne sont jamais affichées — seul un extrait rédigé est conservé. En cas de finding confirmé, contacter le client pour rotation immédiate du secret.</div>`
     : `<div class="argus-clean-badge">✓ Aucun credential exposé détecté</div>`;
+  const githubTimeoutNote = githubTimedOutAssets.length
+    ? `<div class="argus-report-note" style="color:var(--amber)">⚠ Scan GitHub interrompu pour ${githubTimedOutAssets.map(v => escHtml(v)).join(', ')} — relancer si nécessaire.</div>`
+    : '';
 
   const recos = [];
   const openFindings = findings.filter(f => !['false_positive', 'remediated'].includes(f.status));
@@ -4541,6 +4579,7 @@ function argusRenderScanReport({ companyName, domain, assets, exposures, finding
     <div class="argus-report-section">
       <h4>GitHub Credential Exposure</h4>
       ${githubSection}
+      ${githubTimeoutNote}
     </div>
     <div class="argus-report-section">
       <h4>Recommandations</h4>
