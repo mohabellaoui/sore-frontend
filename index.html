@@ -4227,18 +4227,23 @@ const ARGUS_SCAN_STEPS_BASE = [
   { id: 'approve', label: 'Approbation' },
   { id: 'scan', label: 'Scan passif' },
   { id: 'assets', label: 'Assets' },
-  { id: 'github', label: 'GitHub Leaks' },
+  { id: 'github', label: 'Code Leaks' },
   { id: 'report', label: 'Rapport' },
 ];
 const ARGUS_PROSPECT_STEP = { id: 'prospect', label: 'Prospect' };
-// Rotation toutes les 10s pendant l'attente du scan GitHub Leaks (48-90s réels côté
-// backend, 12 dork queries × 4s de throttle) — évite que l'utilisateur pense que
-// c'est bloqué pendant une attente longue mais normale.
-const ARGUS_GITHUB_SCAN_MESSAGES = [
-  'Analyse des repos publics...',
-  'Recherche credentials exposés...',
-  'Vérification API keys...',
-  'Finalisation...',
+// Rotation toutes les 25s pendant l'attente du scan Code Leaks multi-sources
+// (backend commit cccbbe9, searchAllCodeLeaks) — 7 sources en séquence avec
+// throttle entre chacune, ~3-5 minutes réels pour un seul actif. Évite que
+// l'utilisateur pense que c'est bloqué pendant une attente longue mais normale.
+const ARGUS_CODE_LEAK_SCAN_MESSAGES = [
+  'Analyse GitHub...',
+  'Analyse GitLab...',
+  'Recherche grep.app (multi-plateforme)...',
+  'Vérification Pastebin...',
+  'Analyse Docker Hub...',
+  'Vérification npm/PyPI...',
+  'Analyse Sourcegraph...',
+  'Compilation des résultats...',
 ];
 // Même liste que src/agents/argus.js#SHODAN_CRITICAL_PORTS (backend, commit
 // 86ccef7) — dupliquée ici côté affichage uniquement pour surligner les
@@ -4314,6 +4319,25 @@ async function argusScanEnsureClientsCache() {
 function argusConfidenceBadge(confidence) {
   const map = { high: 'critical', medium: 'medium', low: 'low' };
   return `<span class="sev-badge ${map[confidence] || 'info'}">${escHtml(confidence || '—')}</span>`;
+}
+
+// Un badge par plateforme d'origine (github_leak_findings.source, backend
+// commit cccbbe9) — couleurs de marque quand la plateforme en a une connue
+// (Docker bleu, npm rouge, GitLab orange), teintes génériques sinon.
+const ARGUS_SOURCE_BADGE_STYLE = {
+  github: { bg: '#333333', label: 'GitHub' },
+  gitlab: { bg: '#fc6d26', label: 'GitLab' },
+  grep_app: { bg: '#8b5cf6', label: 'grep.app' },
+  pastebin: { bg: '#7c1d1d', label: 'Pastebin' },
+  dockerhub: { bg: '#2496ed', label: 'Docker Hub' },
+  npm: { bg: '#cb3837', label: 'npm' },
+  pypi: { bg: '#66b3ff', label: 'PyPI', dark: true },
+  sourcegraph: { bg: '#c4b5fd', label: 'Sourcegraph', dark: true },
+};
+function argusSourceBadge(source) {
+  const style = ARGUS_SOURCE_BADGE_STYLE[source] || { bg: '#555', label: source || '—' };
+  const textColor = style.dark ? '#1a1a1a' : '#fff';
+  return `<span style="background:${style.bg};color:${textColor};padding:2px 8px;border-radius:3px;font-size:10px;font-weight:600;white-space:nowrap">${escHtml(style.label)}</span>`;
 }
 
 // Couleur par techno détectée (empreinte technique) — pas de --blue dans ce
@@ -4437,42 +4461,48 @@ async function argusScanStart() {
     const assets = assetsRes.data?.data || [];
     argusScanSetStep('assets', 'done'); argusScanSetStep('github', 'active');
 
-    // ── ÉTAPE 5 — GitHub Leak Scan sur 3 actifs uniques max (dédupliqués par asset_value)
-    // Timeout 120s par asset (pas les 15s par défaut) : le backend enchaîne ~12 dork
-    // queries à 4s de throttle chacune (48-90s réels) — un timeout court annule le
-    // fetch bien avant que le backend ait fini de répondre. Pas de retry-on-timeout
-    // ici (retryOnTimeout=false) : passé 120s ce n'est pas un cold start, retenter
-    // ferait juste doubler l'attente avant l'échec.
+    // ── ÉTAPE 5 — Code & Credential Exposure multi-sources (GitHub + GitLab +
+    // grep.app + Pastebin + Docker Hub + npm/PyPI + Sourcegraph), backend
+    // commit cccbbe9 (POST /api/argus/scan/code-leaks, argus.searchAllCodeLeaks).
+    // /api/argus/scan/github-leaks reste disponible côté backend (conservée
+    // pour compatibilité, pas supprimée) mais ce flux utilise désormais
+    // exclusivement la version multi-sources.
+    // Timeout 5 minutes (300000ms), pas 120s comme l'ancien flux GitHub seul :
+    // l'orchestrateur enchaîne 7 sources en séquence avec throttle entre
+    // chacune (jamais en parallèle, pour éviter un ban IP simultané côté
+    // serveur) — 3-5 minutes réels pour UN SEUL actif. Un seul actif est donc
+    // scanné ici (le premier sous-domaine unique découvert), pas une boucle
+    // sur 3 comme l'ancien flux : répéter cette séquence sur 3 cibles
+    // prendrait 9-15 minutes, hors de portée d'un scan interactif.
     const uniqueAssetValues = [...new Map(assets.map(a => [a.asset_value, a])).values()];
-    const githubTargets = uniqueAssetValues.slice(0, 3);
+    const codeLeakTarget = uniqueAssetValues[0] || null;
     let githubWarning = null;
     const githubTimedOutAssets = [];
-    if (githubTargets.length) {
+    if (codeLeakTarget) {
       let msgIndex = 0;
-      argusScanSetStatus(ARGUS_GITHUB_SCAN_MESSAGES[0]);
+      argusScanSetStatus(ARGUS_CODE_LEAK_SCAN_MESSAGES[0]);
       const rotateMsg = setInterval(() => {
-        msgIndex = (msgIndex + 1) % ARGUS_GITHUB_SCAN_MESSAGES.length;
-        argusScanSetStatus(ARGUS_GITHUB_SCAN_MESSAGES[msgIndex]);
-      }, 10000);
-      let results;
+        msgIndex = (msgIndex + 1) % ARGUS_CODE_LEAK_SCAN_MESSAGES.length;
+        argusScanSetStatus(ARGUS_CODE_LEAK_SCAN_MESSAGES[msgIndex]);
+      }, 25000);
+      let res;
       try {
-        results = await Promise.allSettled(
-          githubTargets.map(a => argusScanFetch('/argus/scan/github-leaks', {
-            method: 'POST', body: JSON.stringify({ scopeId, assetId: a.id }),
-          }, 120000, false))
-        );
+        res = await argusScanFetch('/argus/scan/code-leaks', {
+          method: 'POST', body: JSON.stringify({ scopeId, assetId: codeLeakTarget.id }),
+        }, 300000, false); // pas de retry-on-timeout : passé 5 minutes, retenter doublerait juste l'attente avant l'échec
       } finally {
         clearInterval(rotateMsg);
       }
-      results.forEach((r, i) => {
-        if (r.status === 'fulfilled' && !r.value.ok && r.value.timedOut) githubTimedOutAssets.push(githubTargets[i].asset_value);
-      });
-      const configMissing = results.some(r => r.status === 'fulfilled' && r.value.status === 503);
-      const rateLimited = results.some(r => r.status === 'fulfilled' && r.value.ok && (r.value.data?.data?.scanned ?? 0) === 0);
-      if (configMissing) { githubWarning = 'Scan GitHub Leaks indisponible (clé API GitHub non configurée côté serveur).'; argusScanSetStep('github', 'warning'); }
-      else if (githubTimedOutAssets.length) { githubWarning = `Scan GitHub interrompu (timeout 120s) sur ${githubTimedOutAssets.length} actif(s) — findings partiels.`; argusScanSetStep('github', 'warning'); }
-      else if (rateLimited) { githubWarning = 'Rate limit GitHub atteint — findings partiels.'; argusScanSetStep('github', 'warning'); }
-      else { argusScanSetStep('github', 'done'); }
+      if (res.ok) {
+        argusScanSetStep('github', 'done');
+      } else if (res.timedOut) {
+        githubTimedOutAssets.push(codeLeakTarget.asset_value);
+        githubWarning = 'Scan Code Leaks interrompu (timeout 5 min) — résultats partiels.';
+        argusScanSetStep('github', 'warning');
+      } else {
+        githubWarning = res.data?.error || `Scan Code Leaks indisponible (HTTP ${res.status}).`;
+        argusScanSetStep('github', 'warning');
+      }
     } else {
       argusScanSetStep('github', 'done'); // aucun actif à scanner — pas une erreur
     }
@@ -4579,20 +4609,21 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
 
   const githubSection = findings.length
     ? `<div class="table-wrap"><table class="data-table">
-        <thead><tr><th>Repo</th><th>Fichier</th><th>Type</th><th>Confiance</th><th>Snippet redacté</th><th>Statut</th></tr></thead>
+        <thead><tr><th>Repo</th><th>Fichier</th><th>Type</th><th>Source</th><th>Confiance</th><th>Snippet redacté</th><th>Statut</th></tr></thead>
         <tbody>${findings.map(f => `<tr>
           <td style="font-size:11px">${escHtml(f.repo_url)}</td>
           <td style="font-family:var(--font-mono);font-size:11px">${escHtml(f.file_path)}</td>
           <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(f.finding_type)}</td>
+          <td>${argusSourceBadge(f.source)}</td>
           <td>${argusConfidenceBadge(f.confidence)}</td>
           <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(f.matched_snippet)}</td>
           <td><span class="status-pill ${f.status}">${escHtml(f.status)}</span></td>
         </tr>`).join('')}</tbody>
       </table></div>
       <div class="argus-report-note">Les valeurs sensibles ne sont jamais affichées — seul un extrait rédigé est conservé. En cas de finding confirmé, contacter le client pour rotation immédiate du secret.</div>`
-    : `<div class="argus-clean-badge">✓ Aucun credential exposé détecté sur les repos publics analysés</div>`;
+    : `<div class="argus-clean-badge">✓ Aucun credential exposé détecté sur les sources publiques analysées</div>`;
   const githubTimeoutNote = githubTimedOutAssets.length
-    ? `<div class="argus-report-note" style="color:var(--amber)">⚠ Scan GitHub interrompu pour ${githubTimedOutAssets.map(v => escHtml(v)).join(', ')} — relancer si nécessaire.</div>`
+    ? `<div class="argus-report-note" style="color:var(--amber)">⚠ Scan Code Leaks interrompu pour ${githubTimedOutAssets.map(v => escHtml(v)).join(', ')} — relancer si nécessaire.</div>`
     : '';
 
   // ── Sections threat intel passive (backend commits c484f88/86ccef7) ──
@@ -4730,7 +4761,7 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
       </table></div>
     </div>
     <div class="argus-report-section">
-      <h4>GitHub Credential Exposure</h4>
+      <h4>Code & Credential Exposure — Sources Publiques Multiples</h4>
       ${githubSection}
       ${githubTimeoutNote}
     </div>
@@ -4892,17 +4923,20 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
   const githubSection = findings.length
     ? `<p><em>Les extraits ci-dessous sont partiellement masqués. Les valeurs complètes ne sont jamais stockées ni transmises.</em></p>
       <table>
-        <thead><tr><th>Repo</th><th>Fichier</th><th>Type</th><th>Confiance</th><th>Extrait masqué</th><th>Statut</th></tr></thead>
+        <thead><tr><th>Repo</th><th>Fichier</th><th>Type</th><th>Source</th><th>Confiance</th><th>Extrait masqué</th><th>Statut</th></tr></thead>
         <tbody>${findings.map(f => `<tr class="${f.confidence === 'high' ? 'critical' : f.confidence === 'medium' ? 'high' : ''}">
           <td>${escHtml(f.repo_url)}</td>
           <td>${escHtml(f.file_path)}</td>
           <td>${escHtml(f.finding_type)}</td>
+          <td>${argusSourceBadge(f.source)}</td>
           <td>${argusPdfConfidenceBadge(f.confidence)}</td>
           <td>${escHtml(f.matched_snippet)}</td>
           <td>${escHtml(f.status)}</td>
         </tr>`).join('')}</tbody>
-      </table>`
-    : `<p><span class="badge-green">✓</span> Aucun credential exposé détecté sur les repositories publics analysés.</p>`;
+      </table>
+      <p><em>Sources analysées : GitHub, GitLab, grep.app (multi-plateforme), Pastebin, Docker Hub, npm/PyPI, Sourcegraph.</em></p>`
+    : `<p><span class="badge-green">✓</span> Aucun credential exposé détecté sur les sources publiques analysées.</p>
+      <p><em>Sources analysées : GitHub, GitLab, grep.app (multi-plateforme), Pastebin, Docker Hub, npm/PyPI, Sourcegraph.</em></p>`;
 
   // ── Section 4b : empreinte technique ──
   const techStackSectionPdf = intel?.techStack?.length
@@ -4985,6 +5019,7 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
   const recos = [];
   const openFindings = findings.filter(f => !['false_positive', 'remediated'].includes(f.status));
   openFindings.filter(f => f.confidence === 'high').forEach(f => recos.push({ level: 'critical', text: 'Rotation immédiate des secrets exposés', asset: `${f.repo_url} — ${f.file_path}`, delay: 'Immédiat' }));
+  openFindings.filter(f => f.source === 'pastebin').forEach(f => recos.push({ level: 'critical', text: 'Credentials détectés sur Pastebin — rotation immédiate requise', asset: `${f.repo_url}`, delay: 'Immédiat' }));
   if (assets.some(a => a.asset_kind === 'subdomain' && a.asset_value.startsWith('ftp.')))
     recos.push({ level: 'critical', text: 'Désactivation du serveur FTP — migration vers SFTP/FTPS', asset: assets.find(a => a.asset_kind === 'subdomain' && a.asset_value.startsWith('ftp.')).asset_value, delay: 'Immédiat' });
   rows.filter(g => g.tls?.daysUntilExpiry != null && g.tls.daysUntilExpiry < 30).forEach(g => recos.push({ level: 'critical', text: 'Renouvellement urgent du certificat TLS', asset: g.assetValue, delay: '< 7 jours' }));
@@ -5100,7 +5135,7 @@ ${prospectBanner}
   <tbody>${tlsRows}</tbody>
 </table>
 
-<h2>4. Exposition de Credentials — Sources Publiques</h2>
+<h2>4. Code & Credential Exposure</h2>
 ${githubSection}
 
 ${techStackSectionPdf}
