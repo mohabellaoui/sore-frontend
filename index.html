@@ -1314,6 +1314,7 @@ select.form-input option{background:var(--surface)}
               <div class="lbl">Score d'exposition</div>
             </div>
             <button class="action-btn primary" id="argus-pdf-btn" style="margin-top:0" onclick="argusGeneratePDFReport()">📄 Générer rapport PDF</button>
+            <button class="action-btn" id="argus-pentest-btn" style="margin-left:8px;background:#1a2b5e;color:white;border:none" onclick="argusGeneratePentestProposal()">🎯 Générer proposition pentest</button>
           </div>
         </div>
         <div id="argus-report-prospect-banner" style="display:none"></div>
@@ -4503,7 +4504,7 @@ async function argusScanStart() {
     argusScanSetStep('report', 'done');
     argusScanSetStatus(githubWarning ? '⚠ Scan terminé avec avertissement — ' + githubWarning : '✅ Scan terminé.', githubWarning ? 'warning' : null);
 
-    argusRenderScanReport({ companyName: client.name, domain, scopeId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets, intel, breaches });
+    argusRenderScanReport({ companyName: client.name, domain, scopeId, clientId: client.id, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets, intel, breaches });
     loadArgusScope(); loadArgusAssets(); loadArgusExposures(); loadArgusSummary();
   } catch (e) {
     argusScanMarkActiveAsError();
@@ -4543,8 +4544,11 @@ function argusGroupAssetsByValue(assets, exposures) {
 // exigerait de sérialiser tout l'objet dans un attribut HTML).
 let argusLastScanData = null;
 
-function argusRenderScanReport({ companyName, domain, scopeId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets = [], intel = null, breaches = [] }) {
-  argusLastScanData = { companyName, domain, scopeId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets, intel, breaches };
+function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets = [], intel = null, breaches = [] }) {
+  // clientId ajouté ici (absent du reste des données stockées avant cette
+  // fonctionnalité) — nécessaire à argusGeneratePentestProposal ci-dessous
+  // pour POST /api/argus/pentest-proposal, qui exige clientId dans le body.
+  argusLastScanData = { companyName, domain, scopeId, clientId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets, intel, breaches };
   const rows = argusGroupAssetsByValue(assets, exposures);
   const hibpBreaches = breaches.filter(b => b.source === 'hibp');
   const shodanFindings = breaches.filter(b => b.source === 'shodan');
@@ -5142,6 +5146,203 @@ async function argusGeneratePDFReport() {
     btn.disabled = false;
     btn.innerHTML = originalLabel;
   }
+}
+
+// ════════════════════════════════════════════
+// ARGUS — Proposition de pentest (backend commit, agents/pentest.js)
+// ════════════════════════════════════════════
+//
+// Écarts corrigés par rapport au snippet d'origine, vérifiés avant d'écrire
+// ce code :
+//  - argusScanFetch(...) ne lève JAMAIS (voir sa définition plus haut dans
+//    ce fichier) — elle renvoie toujours { ok, status, data }, même en cas
+//    d'échec réseau/HTTP/timeout. Un try/catch autour de son appel ne peut
+//    donc jamais intercepter un 400/404/500 : il faut vérifier res.ok
+//    explicitement, même pattern que argusScanStart plus haut.
+//  - La route POST /api/argus/pentest-proposal renvoie { data: proposal } —
+//    et argusScanFetch enveloppe déjà elle-même le JSON reçu sous .data.
+//    La proposition réelle est donc dans res.data?.data (double
+//    enveloppe), pas res.data — même piège déjà rencontré et corrigé pour
+//    scopeRes/assetsRes/findingsRes dans argusScanStart.
+//  - event.target (implicite, pas passé en paramètre par
+//    onclick="argusGeneratePentestProposal()") remplacé par
+//    document.getElementById('argus-pentest-btn'), même pattern que
+//    argusGeneratePDFReport()/argus-pdf-btn juste au-dessus — pas de
+//    dépendance fragile à l'objet event global.
+//  - alert()/confirm() ne sont utilisés nulle part ailleurs dans ce
+//    fichier pour les erreurs de ce flux (showToast partout) — remplacé
+//    en conséquence.
+//  - argusLastScanData ne portait pas clientId avant ce commit (jamais
+//    nécessaire jusqu'ici) — ajouté à argusRenderScanReport ci-dessus.
+async function argusGeneratePentestProposal() {
+  if (!argusLastScanData) { showToast('⚠ Lancez d\'abord un scan.'); return; }
+  const { clientId, scopeId, companyName, domain } = argusLastScanData;
+
+  const btn = document.getElementById('argus-pentest-btn');
+  const originalLabel = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Génération en cours...';
+
+  try {
+    const res = await argusScanFetch('/argus/pentest-proposal', {
+      method: 'POST',
+      body: JSON.stringify({ clientId, scopeId, companyName, domain }),
+    }, 60000, false); // 60s — Groq peut prendre du temps ; pas de retry-on-timeout, un 2e appel Groq doublerait juste l'attente
+
+    if (!res.ok) { showToast('❌ Erreur lors de la génération : ' + (res.data?.error || `HTTP ${res.status}`)); return; }
+
+    argusRenderPentestProposal(res.data?.data);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalLabel;
+  }
+}
+
+function argusPentestScoreBadgeColor(score) {
+  if (score === 'CRITIQUE') return '#dc2626';
+  if (score === 'ÉLEVÉ') return '#ea580c';
+  return '#ca8a04';
+}
+
+function argusPentestRowClass(criticite) {
+  if (criticite === 'CRITIQUE') return 'critical';
+  if (criticite === 'ÉLEVÉ') return 'high';
+  return '';
+}
+
+/** Fenêtre imprimable indépendante — même style que argusBuildPdfReportHtml (fond blanc, Georgia, navy #1a2b5e). */
+function argusRenderPentestProposal(proposal) {
+  if (!proposal) { showToast('❌ Proposition vide reçue du serveur'); return; }
+  const { ref, companyName, domain, date, score, groqContent, vectors, pricing, assets_summary, findings_summary } = proposal;
+  const dateLabel = new Date(date).toLocaleDateString('fr-FR', { year: 'numeric', month: 'long', day: 'numeric' });
+  const scoreColor = argusPentestScoreBadgeColor(score);
+
+  const assetsByTypeRows = Object.entries(assets_summary?.by_type || {}).length
+    ? Object.entries(assets_summary.by_type).map(([kind, count]) => `<tr><td>${escHtml(kind)}</td><td>${escHtml(count)}</td></tr>`).join('')
+    : `<tr><td colspan="2">Aucun actif recensé.</td></tr>`;
+
+  const vectorsRows = (vectors || []).map((v, i) => `<tr class="${argusPentestRowClass(v.criticite)}">
+    <td>${i + 1}</td>
+    <td>${escHtml(v.vector)}</td>
+    <td>${escHtml(v.criticite)}</td>
+    <td>${escHtml(v.description || '—')}</td>
+  </tr>`).join('');
+
+  const pricingRows = (pricing?.lines || []).map(l => `<tr>
+    <td>${escHtml(l.label)}</td>
+    <td>${escHtml(l.days)}</td>
+    <td>${escHtml(l.unit_price)} MAD</td>
+    <td>${escHtml(l.total)} MAD</td>
+  </tr>`).join('');
+
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Proposition Pentest — ${escHtml(companyName)}</title>
+<style>
+body { font-family: Georgia, serif; color: #1a1a1a; margin: 40px; }
+h1 { font-size: 24px; color: #1a2b5e; border-bottom: 2px solid #1a2b5e; padding-bottom: 8px; }
+h2 { font-size: 16px; color: #1a2b5e; margin-top: 30px; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+th { background: #1a2b5e; color: white; padding: 8px; text-align: left; }
+td { padding: 6px 8px; border: 1px solid #ddd; }
+tr:nth-child(even) { background: #f8f8f8; }
+.critical { background: #fee2e2 !important; }
+.high { background: #fef3c7 !important; }
+.header-block { border: 2px solid #1a2b5e; padding: 24px; margin-bottom: 30px; text-align: center; }
+.header-block table { margin: 16px 0 0; text-align: left; }
+.header-block td { border: none; padding: 3px 0; }
+.confidentiel { color: #dc2626; font-weight: bold; letter-spacing: 2px; }
+.score-badge { display: inline-block; padding: 6px 16px; border-radius: 4px; color: white; font-weight: bold; background: ${scoreColor}; }
+.warning-box { background: #fef3c7; border: 1px solid #f59e0b; padding: 12px; margin: 16px 0; font-size: 12px; }
+.signature-block { display: flex; justify-content: space-between; margin-top: 30px; }
+.signature-box { width: 45%; border-top: 1px solid #1a1a1a; padding-top: 8px; margin-top: 60px; font-size: 12px; }
+footer { margin-top: 40px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 10px; color: #666; text-align: center; }
+@media print {
+  @page { margin: 20mm; }
+  body { margin: 0; }
+  .no-print { display: none; }
+  h2 { page-break-after: avoid; }
+  table { page-break-inside: avoid; }
+  footer { position: fixed; bottom: 0; width: 100%; font-size: 10px; color: #666; text-align: center; border-top: 1px solid #ddd; }
+}
+</style>
+</head><body>
+
+<div class="header-block">
+  <div style="font-size:22px;font-weight:bold;color:#1a2b5e">SORE SECURITY</div>
+  <div style="font-size:16px;margin-top:6px">PROPOSITION DE TEST D'INTRUSION</div>
+  <div style="font-size:13px;color:#555">Pentest Attack Surface — ${escHtml(companyName)}</div>
+  <table>
+    <tr><td style="width:160px"><strong>Client</strong></td><td>${escHtml(companyName)}</td></tr>
+    <tr><td><strong>Domaine</strong></td><td>${escHtml(domain)}</td></tr>
+    <tr><td><strong>Référence</strong></td><td>${escHtml(ref)}</td></tr>
+    <tr><td><strong>Date</strong></td><td>${escHtml(dateLabel)}</td></tr>
+    <tr><td><strong>Score criticité</strong></td><td><span class="score-badge">${escHtml(score)}</span></td></tr>
+    <tr><td><strong>Validité</strong></td><td>30 jours</td></tr>
+    <tr><td><strong>Classification</strong></td><td class="confidentiel">CONFIDENTIEL</td></tr>
+  </table>
+  <div class="warning-box">Document soumis à signature d'une convention de tests d'intrusion (CTI) avant toute intervention.</div>
+</div>
+
+<h2>1. Résumé Exécutif</h2>
+<p>${escHtml(groqContent?.executive_summary || '—')}</p>
+
+<h2>2. Surface d'Attaque Identifiée</h2>
+<table>
+  <thead><tr><th>Type d'actif</th><th>Nombre</th></tr></thead>
+  <tbody>${assetsByTypeRows}</tbody>
+</table>
+<p>Findings GitHub : ${escHtml(findings_summary?.github ?? 0)} — Fuites HIBP : ${escHtml(findings_summary?.hibp ?? 0)} — Services Shodan : ${escHtml(findings_summary?.shodan ?? 0)}</p>
+
+<h2>3. Justification du Périmètre</h2>
+<p>${escHtml(groqContent?.scope_justification || '—')}</p>
+
+<h2>4. Vecteurs d'Attaque Proposés</h2>
+<table>
+  <thead><tr><th>#</th><th>Vecteur</th><th>Criticité</th><th>Description</th></tr></thead>
+  <tbody>${vectorsRows}</tbody>
+</table>
+
+<h2>5. Note Méthodologique</h2>
+<p>${escHtml(groqContent?.methodology_note || '—')}</p>
+<p><em>Approche PTES — blackbox — aucune action sans CTI signée.</em></p>
+
+<h2>6. Proposition Commerciale</h2>
+<table>
+  <thead><tr><th>Prestation</th><th>Jours</th><th>Tarif jour</th><th>Total HT</th></tr></thead>
+  <tbody>${pricingRows}</tbody>
+</table>
+<table>
+  <tbody>
+    <tr><td><strong>TOTAL HT</strong></td><td>${escHtml(pricing?.total_ht ?? 0)} MAD</td></tr>
+    <tr><td><strong>TVA (20%)</strong></td><td>${escHtml(pricing?.tva ?? 0)} MAD</td></tr>
+    <tr><td><strong>TOTAL TTC</strong></td><td>${escHtml(pricing?.total_ttc ?? 0)} MAD</td></tr>
+  </tbody>
+</table>
+<p><em>Option re-test (post-remédiation, optionnelle) : ${escHtml(pricing?.retest_ht ?? 0)} MAD HT — ${escHtml(pricing?.retest_ttc ?? 0)} MAD TTC.</em></p>
+
+<h2>7. Conclusion et Urgence</h2>
+<p>${escHtml(groqContent?.risk_conclusion || '—')}</p>
+
+<h2>8. Acceptation</h2>
+<p>Ce document vaut proposition commerciale. La signature déclenche l'émission d'une convention de tests d'intrusion (CTI).</p>
+<div class="signature-block">
+  <div class="signature-box">Pour Sore Security</div>
+  <div class="signature-box">Pour ${escHtml(companyName)}</div>
+</div>
+
+<footer>
+  Sore Security SARL — Ichrak Center, Casablanca<br>
+  contact@sore-security.com — sore-security.com<br>
+  Toute intervention est soumise à autorisation écrite préalable.
+</footer>
+
+</body></html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) { showToast('⚠ Pop-up bloquée — autorisez les pop-ups pour générer la proposition'); return; }
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 800);
 }
 
 // ════════════════════════════════════════════
