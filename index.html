@@ -4586,8 +4586,18 @@ function argusRenderScanReport({ companyName, domain, assets, exposures, finding
       <ul class="argus-reco-list">${recos.map(r => `<li class="argus-reco-item"><span class="sev-badge ${r.sev}">${escHtml(r.sev)}</span>${escHtml(r.text)}</li>`).join('')}</ul>
     </div>
   `;
-  document.getElementById('argus-report').style.display = '';
-  document.getElementById('argus-report').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // `.style.display = ''` retombe sur la règle CSS `.argus-report{display:none}`
+  // (classe, pas style inline) — l'élément reste donc caché malgré le contenu
+  // injecté ci-dessus. Il faut une valeur explicite ('block') pour que le style
+  // inline prenne le dessus sur la classe.
+  const reportEl = document.getElementById('argus-report');
+  if (reportEl) {
+    reportEl.style.display = 'block';
+    reportEl.style.visibility = 'visible';
+    reportEl.style.opacity = '1';
+    reportEl.style.height = 'auto';
+    setTimeout(() => reportEl.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+  }
 }
 
 function argusExportScanReport() {
