@@ -1,0 +1,13 @@
+{
+  "name": "sore-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Sore Security — frontend (single-file app, index.html). package.json exists only to run the Jest test suite under __tests__/.",
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  }
+}
