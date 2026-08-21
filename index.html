@@ -4239,6 +4239,11 @@ const ARGUS_GITHUB_SCAN_MESSAGES = [
   'Vérification API keys...',
   'Finalisation...',
 ];
+// Même liste que src/agents/argus.js#SHODAN_CRITICAL_PORTS (backend, commit
+// 86ccef7) — dupliquée ici côté affichage uniquement pour surligner les
+// lignes correspondantes, la sévérité elle-même vient toujours du backend
+// (breach.severity), jamais recalculée côté client.
+const ARGUS_SHODAN_CRITICAL_PORTS = [21, 23, 3389, 5900, 6379, 27017, 5432, 3306, 1433];
 let argusActiveScanSteps = ARGUS_SCAN_STEPS_BASE;
 let argusScanStepStates = {};
 let argusScanRunning = false;
@@ -4308,6 +4313,26 @@ async function argusScanEnsureClientsCache() {
 function argusConfidenceBadge(confidence) {
   const map = { high: 'critical', medium: 'medium', low: 'low' };
   return `<span class="sev-badge ${map[confidence] || 'info'}">${escHtml(confidence || '—')}</span>`;
+}
+
+// Couleur par techno détectée (empreinte technique) — pas de --blue dans ce
+// thème (seulement --cyan/--red/--amber/--green, voir :root), --cyan sert de
+// substitut le plus proche pour "PHP = bleu".
+function argusTechBadge(tech) {
+  if (!tech) return '<span style="color:var(--text-dim)">—</span>';
+  const t = tech.toLowerCase();
+  const color = /wordpress|drupal|joomla|shopify|wix/.test(t) ? 'var(--amber)'
+    : /php|asp\.net|express|laravel/.test(t) ? 'var(--cyan)'
+    : 'var(--green)';
+  return `<span style="color:${color};font-weight:600">${escHtml(tech)}</span>`;
+}
+
+function argusWhoisExpiryCell(whois) {
+  const dateStr = whois.expirationDate ? new Date(whois.expirationDate).toLocaleDateString('fr-FR') : null;
+  if (whois.daysUntilExpiry == null) return dateStr ? escHtml(dateStr) : '<span style="color:var(--text-dim)">—</span>';
+  const days = whois.daysUntilExpiry;
+  const color = days < 30 ? 'var(--red)' : days < 90 ? 'var(--amber)' : 'var(--green)';
+  return `<span style="color:${color};font-weight:600">${escHtml(dateStr || '—')} (${days}j)</span>`;
 }
 
 // Badge live sous le champ "Société" : indique si la saisie correspond à un
@@ -4454,20 +4479,31 @@ async function argusScanStart() {
     argusScanSetStatus(githubWarning ? '⚠ ' + githubWarning : 'Génération du rapport...', githubWarning ? 'warning' : null);
 
     // ── ÉTAPE 6 — findings GitHub + résumé d'exposition + expositions CVE des actifs de ce scope
-    const [findingsRes, summaryRes, exposuresRes] = await Promise.all([
+    // + intel (WHOIS/ASN/Wayback/tech stack) + findings HIBP/Shodan (backend commits
+    // c484f88/86ccef7). `/argus/intel` et `/argus/findings/breaches`, PAS
+    // `/api/argus/...` : API contient déjà `/api` (voir const API en tête de fichier) —
+    // argusScanFetch le préfixe automatiquement, comme tous les autres appels de ce
+    // flux. Promise.all suffit ici (pas besoin de allSettled) : argusScanFetch ne
+    // rejette jamais, elle renvoie toujours { ok, status, data } même en cas d'échec
+    // réseau/timeout — il n'y a donc rien qu'allSettled protégerait de plus.
+    const [findingsRes, summaryRes, exposuresRes, intelRes, breachRes] = await Promise.all([
       argusScanFetch(`/argus/findings/github-leaks?clientId=${client.id}&scopeId=${scopeId}`),
       argusScanFetch(`/argus/summary?clientId=${client.id}`),
       argusScanFetch(`/argus/exposures?clientId=${client.id}`),
+      argusScanFetch(`/argus/intel?clientId=${client.id}&scopeId=${scopeId}`, {}, 30000, false),
+      argusScanFetch(`/argus/findings/breaches?clientId=${client.id}&scopeId=${scopeId}`, {}, 15000, false),
     ]);
     const findings = findingsRes.data?.data || [];
     const summary = summaryRes.data?.data || null;
     const assetIds = new Set(assets.map(a => a.id));
     const exposures = (exposuresRes.data?.data || []).filter(e => assetIds.has(e.asset_id));
+    const intel = intelRes.ok ? intelRes.data?.data || null : null;
+    const breaches = breachRes.ok ? breachRes.data?.data || [] : [];
 
     argusScanSetStep('report', 'done');
     argusScanSetStatus(githubWarning ? '⚠ Scan terminé avec avertissement — ' + githubWarning : '✅ Scan terminé.', githubWarning ? 'warning' : null);
 
-    argusRenderScanReport({ companyName: client.name, domain, scopeId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets });
+    argusRenderScanReport({ companyName: client.name, domain, scopeId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets, intel, breaches });
     loadArgusScope(); loadArgusAssets(); loadArgusExposures(); loadArgusSummary();
   } catch (e) {
     argusScanMarkActiveAsError();
@@ -4507,9 +4543,11 @@ function argusGroupAssetsByValue(assets, exposures) {
 // exigerait de sérialiser tout l'objet dans un attribut HTML).
 let argusLastScanData = null;
 
-function argusRenderScanReport({ companyName, domain, scopeId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets = [] }) {
-  argusLastScanData = { companyName, domain, scopeId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets };
+function argusRenderScanReport({ companyName, domain, scopeId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets = [], intel = null, breaches = [] }) {
+  argusLastScanData = { companyName, domain, scopeId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets, intel, breaches };
   const rows = argusGroupAssetsByValue(assets, exposures);
+  const hibpBreaches = breaches.filter(b => b.source === 'hibp');
+  const shodanFindings = breaches.filter(b => b.source === 'shodan');
 
   const cvssBadgeClass = n => n >= 9 ? 'critical' : n >= 7 ? 'high' : n >= 4 ? 'medium' : 'low';
   const surfaceRows = rows.length ? rows.map(g => {
@@ -4552,6 +4590,101 @@ function argusRenderScanReport({ companyName, domain, scopeId, assets, exposures
   const githubTimeoutNote = githubTimedOutAssets.length
     ? `<div class="argus-report-note" style="color:var(--amber)">⚠ Scan GitHub interrompu pour ${githubTimedOutAssets.map(v => escHtml(v)).join(', ')} — relancer si nécessaire.</div>`
     : '';
+
+  // ── Sections threat intel passive (backend commits c484f88/86ccef7) ──
+  const techStackSection = intel?.techStack?.length
+    ? `<div class="argus-report-section">
+        <h4>Empreinte technique</h4>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Actif</th><th>CMS</th><th>Serveur</th><th>Langage</th><th>CDN</th><th>Framework</th></tr></thead>
+          <tbody>${intel.techStack.map(t => `<tr>
+            <td style="font-weight:600;color:var(--text-bright)">${escHtml(t.assetValue)}</td>
+            <td>${argusTechBadge(t.cms)}</td>
+            <td>${argusTechBadge(t.server)}</td>
+            <td>${argusTechBadge(t.language)}</td>
+            <td>${argusTechBadge(t.cdn)}</td>
+            <td>${argusTechBadge(t.framework)}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>` : '';
+
+  const whois = intel?.whois;
+  const whoisSection = whois
+    ? `<div class="argus-report-section">
+        <h4>Informations domaine (WHOIS)</h4>
+        <table class="data-table">
+          <tbody>
+            <tr><td style="font-weight:600;width:200px">Registrar</td><td>${escHtml(whois.registrar || '—')}</td></tr>
+            <tr><td style="font-weight:600">Expiration domaine</td><td>${argusWhoisExpiryCell(whois)}</td></tr>
+            <tr><td style="font-weight:600">Serveurs DNS</td><td style="font-family:var(--font-mono);font-size:11px">${whois.nameservers?.length ? escHtml(whois.nameservers.join(', ')) : '—'}</td></tr>
+            <tr><td style="font-weight:600">Statut</td><td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${whois.status?.length ? escHtml(whois.status.join(', ')) : '—'}</td></tr>
+          </tbody>
+        </table>
+      </div>` : '';
+
+  const asnSection = intel?.asn?.length
+    ? `<div class="argus-report-section">
+        <h4>Infrastructure réseau (ASN)</h4>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Sous-domaine</th><th>ASN</th><th>Opérateur</th><th>Préfixe</th><th>Pays</th><th>Hébergeur</th></tr></thead>
+          <tbody>${intel.asn.map(a => `<tr>
+            <td style="font-weight:600;color:var(--text-bright)">${escHtml(a.assetValue)}</td>
+            <td style="font-family:var(--font-mono);font-size:11px">${a.asn != null ? 'AS' + escHtml(a.asn) : '—'}</td>
+            <td>${escHtml(a.asnName || '—')}</td>
+            <td style="font-family:var(--font-mono);font-size:11px">${escHtml(a.prefix || '—')}</td>
+            <td>${escHtml(a.country || '—')}</td>
+            <td>${a.isHosting ? '<span class="sev-badge high">Cloud</span>' : '<span style="color:var(--text-dim)">—</span>'}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>` : '';
+
+  const wayback = intel?.wayback;
+  const waybackSection = wayback
+    ? `<div class="argus-report-section">
+        <h4>Historique web (Archive)</h4>
+        <p style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim)">${wayback.hasArchive
+          ? `Première archive : ${escHtml(wayback.oldestSnapshot || '—')} — ${escHtml(wayback.totalSnapshots ?? 0)} snapshot(s) disponible(s). <a href="https://web.archive.org/web/*/${encodeURIComponent(domain)}" target="_blank" rel="noopener" style="color:var(--cyan)">Voir l'historique complet →</a>`
+          : `Aucune archive trouvée sur Wayback Machine pour ce domaine.`}</p>
+      </div>` : '';
+
+  const hibpSection = `<div class="argus-report-section">
+    <h4>Fuites de données (HIBP)</h4>
+    ${hibpBreaches.length
+      ? `<div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Nom de la fuite</th><th>Date</th><th>Comptes affectés</th><th>Données exposées</th><th>Sévérité</th></tr></thead>
+          <tbody>${hibpBreaches.map(b => {
+            const hasPasswords = (b.data_classes || []).includes('Passwords');
+            return `<tr style="${hasPasswords ? 'background:rgba(255,45,85,.06)' : ''}">
+              <td style="font-weight:600;color:var(--text-bright)">${escHtml(b.breach_name)}</td>
+              <td style="font-family:var(--font-mono);font-size:11px">${b.breach_date ? new Date(b.breach_date).toLocaleDateString('fr-FR') : '—'}</td>
+              <td style="font-family:var(--font-mono);font-size:11px">${b.breach_count != null ? Number(b.breach_count).toLocaleString('fr-FR') : '—'}</td>
+              <td style="font-size:11px">${(b.data_classes || []).map(escHtml).join(', ') || '—'}</td>
+              <td><span class="sev-badge ${b.severity === 'high' ? 'critical' : 'medium'}">${escHtml(b.severity)}</span></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>`
+      : `<div class="argus-clean-badge">✓ Aucune fuite détectée dans les bases de données connues</div>`}
+  </div>`;
+
+  const shodanSection = `<div class="argus-report-section">
+    <h4>Services exposés (Shodan)</h4>
+    ${shodanFindings.length
+      ? `<div class="table-wrap"><table class="data-table">
+          <thead><tr><th>IP</th><th>Port</th><th>Service</th><th>Version</th><th>Sévérité</th></tr></thead>
+          <tbody>${shodanFindings.map(f => {
+            const isCritical = ARGUS_SHODAN_CRITICAL_PORTS.includes(Number(f.port));
+            const bannerParts = (f.service_banner || '').split(' ').filter(Boolean);
+            return `<tr style="${isCritical ? 'background:rgba(255,45,85,.06)' : ''}">
+              <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-bright)">${escHtml(f.ip)}</td>
+              <td style="font-family:var(--font-mono);font-size:11px;font-weight:600">${escHtml(f.port)}</td>
+              <td>${escHtml(bannerParts[0] || '—')}</td>
+              <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(bannerParts.slice(1).join(' ') || '—')}</td>
+              <td><span class="sev-badge ${f.severity === 'critical' ? 'critical' : f.severity === 'high' ? 'high' : 'medium'}">${escHtml(f.severity)}</span></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>`
+      : `<div class="argus-clean-badge">✓ Aucun service sensible exposé détecté</div>`}
+  </div>`;
 
   const recos = [];
   const openFindings = findings.filter(f => !['false_positive', 'remediated'].includes(f.status));
@@ -4597,6 +4730,12 @@ function argusRenderScanReport({ companyName, domain, scopeId, assets, exposures
       ${githubSection}
       ${githubTimeoutNote}
     </div>
+    ${techStackSection}
+    ${whoisSection}
+    ${asnSection}
+    ${waybackSection}
+    ${hibpSection}
+    ${shodanSection}
     <div class="argus-report-section">
       <h4>Recommandations</h4>
       <ul class="argus-reco-list">${recos.map(r => `<li class="argus-reco-item"><span class="sev-badge ${r.sev}">${escHtml(r.sev)}</span>${escHtml(r.text)}</li>`).join('')}</ul>
@@ -4639,7 +4778,7 @@ Sore Security recommande la mise en place d'une surveillance continue de la surf
  * ARIA) plus haut dans ce fichier.
  */
 async function argusGenerateExecutiveSummary(scanData) {
-  const { companyName, domain, assets, findings } = scanData;
+  const { companyName, domain, assets, findings, intel, breaches = [] } = scanData;
   const subdomains = [...new Set(assets.filter(a => a.asset_kind === 'subdomain').map(a => a.asset_value))];
   const criticalPoints = [];
   if (findings.some(f => f.confidence === 'high')) criticalPoints.push('credentials à haute confiance exposés publiquement');
@@ -4648,10 +4787,21 @@ async function argusGenerateExecutiveSummary(scanData) {
   if (assets.some(a => a.asset_kind === 'subdomain' && a.asset_value.startsWith('staging.'))) criticalPoints.push('environnement de staging exposé publiquement');
   if (!criticalPoints.length) criticalPoints.push('aucun point critique majeur identifié à ce stade');
 
+  const hibpBreachesForPrompt = breaches.filter(b => b.source === 'hibp');
+  const hibpWithPasswords = hibpBreachesForPrompt.filter(b => (b.data_classes || []).includes('Passwords')).length;
+  const shodanFindingsForPrompt = breaches.filter(b => b.source === 'shodan');
+  const shodanCriticalPorts = shodanFindingsForPrompt.filter(f => f.severity === 'critical').map(f => f.port);
+  const techStackLabel = intel?.techStack?.length
+    ? [...new Set(intel.techStack.flatMap(t => [t.cms, t.server]).filter(Boolean))].join(' / ')
+    : null;
+
   const prompt = `Tu es un expert en cybersécurité. Génère un executive summary professionnel en français (10-15 lignes) pour un rapport de reconnaissance passive sur ${companyName} (${domain}).
 Données du scan :
 Surface d'attaque : ${assets.length} actif(s) découvert(s) dont sous-domaines : ${subdomains.length ? subdomains.join(', ') : 'aucun'}.
 Findings GitHub : ${findings.length} credential(s) potentiellement exposé(s).
+Fuites HIBP : ${hibpBreachesForPrompt.length} breach(es) détecté(s) dont ${hibpWithPasswords} avec mots de passe.
+Services Shodan : ${shodanFindingsForPrompt.length} port(s) exposé(s) dont ports critiques : ${shodanCriticalPorts.length ? shodanCriticalPorts.join(', ') : 'aucun'}.
+Stack technique : ${techStackLabel || 'non déterminée'} détecté(e).
 Points critiques : ${criticalPoints.join(', ')}.
 Le résumé doit être adapté à un RSSI, mentionner les risques métier, et recommander un audit approfondi par Sore Security.
 NE PAS mentionner de noms de vendors IA ou d'outils tiers.`;
@@ -4693,7 +4843,9 @@ function argusPdfTlsStatusBadge(days) {
 
 /** Construit le document HTML complet de la fenêtre imprimable — indépendant du DOM affiché à l'écran. */
 function argusBuildPdfReportHtml(scanData, summaryText) {
-  const { companyName, domain, assets, exposures, findings, clientStatus } = scanData;
+  const { companyName, domain, assets, exposures, findings, clientStatus, intel, breaches = [] } = scanData;
+  const hibpBreaches = breaches.filter(b => b.source === 'hibp');
+  const shodanFindings = breaches.filter(b => b.source === 'shodan');
   const rows = argusGroupAssetsByValue(assets, exposures);
   const scanDate = new Date();
   const scanDateLabel = scanDate.toLocaleDateString('fr-FR', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -4748,6 +4900,83 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
       </table>`
     : `<p><span class="badge-green">✓</span> Aucun credential exposé détecté sur les repositories publics analysés.</p>`;
 
+  // ── Section 4b : empreinte technique ──
+  const techStackSectionPdf = intel?.techStack?.length
+    ? `<h2>4b. Empreinte Technique</h2>
+      <table>
+        <thead><tr><th>Actif</th><th>CMS</th><th>Serveur</th><th>Langage</th><th>CDN</th><th>Framework</th></tr></thead>
+        <tbody>${intel.techStack.map(t => `<tr>
+          <td>${escHtml(t.assetValue)}</td>
+          <td>${escHtml(t.cms || '—')}</td>
+          <td>${escHtml(t.server || '—')}</td>
+          <td>${escHtml(t.language || '—')}</td>
+          <td>${escHtml(t.cdn || '—')}</td>
+          <td>${escHtml(t.framework || '—')}</td>
+        </tr>`).join('')}</tbody>
+      </table>`
+    : '';
+
+  // ── Section 4c : informations domaine (WHOIS) ──
+  const whois = intel?.whois;
+  const whoisSectionPdf = whois
+    ? `<h2>4c. Informations Domaine</h2>
+      <table>
+        <tbody>
+          <tr><td style="width:200px"><strong>Registrar</strong></td><td>${escHtml(whois.registrar || '—')}</td></tr>
+          <tr><td><strong>Expiration</strong></td><td>${whois.expirationDate ? escHtml(new Date(whois.expirationDate).toLocaleDateString('fr-FR')) : '—'}${whois.daysUntilExpiry != null ? ` (${escHtml(whois.daysUntilExpiry)} j.)` : ''}</td></tr>
+          <tr><td><strong>Serveurs DNS</strong></td><td>${whois.nameservers?.length ? escHtml(whois.nameservers.join(', ')) : '—'}</td></tr>
+        </tbody>
+      </table>`
+    : '';
+
+  // ── Section 4d : infrastructure réseau (ASN) ──
+  const asnSectionPdf = intel?.asn?.length
+    ? `<h2>4d. Infrastructure Réseau</h2>
+      <table>
+        <thead><tr><th>Sous-domaine</th><th>Opérateur</th><th>Pays</th><th>Hébergement</th></tr></thead>
+        <tbody>${intel.asn.map(a => `<tr>
+          <td>${escHtml(a.assetValue)}</td>
+          <td>${escHtml(a.asnName || '—')}${a.asn != null ? ` (AS${escHtml(a.asn)})` : ''}</td>
+          <td>${escHtml(a.country || '—')}</td>
+          <td>${a.isHosting ? '<span class="badge-orange">Cloud</span>' : 'Datacenter propre'}</td>
+        </tr>`).join('')}</tbody>
+      </table>`
+    : '';
+
+  // ── Section 4e : fuites de données (HIBP) ──
+  const hibpSectionPdf = `<h2>4e. Fuites de Données</h2>
+    ${hibpBreaches.length
+      ? `<table>
+          <thead><tr><th>Nom de la fuite</th><th>Date</th><th>Comptes affectés</th><th>Données exposées</th><th>Sévérité</th></tr></thead>
+          <tbody>${hibpBreaches.map(b => `<tr class="${b.severity === 'high' ? 'critical' : ''}">
+            <td>${escHtml(b.breach_name)}</td>
+            <td>${b.breach_date ? escHtml(new Date(b.breach_date).toLocaleDateString('fr-FR')) : '—'}</td>
+            <td>${b.breach_count != null ? escHtml(Number(b.breach_count).toLocaleString('fr-FR')) : '—'}</td>
+            <td>${(b.data_classes || []).map(escHtml).join(', ') || '—'}</td>
+            <td>${b.severity === 'high' ? '<span class="badge-red">HIGH</span>' : '<span class="badge-orange">MEDIUM</span>'}</td>
+          </tr>`).join('')}</tbody>
+        </table>`
+      : `<p><span class="badge-green">✓</span> Aucune fuite détectée dans les bases de données connues.</p>`}`;
+
+  // ── Section 4f : services exposés (Shodan) ──
+  const shodanSectionPdf = `<h2>4f. Services Exposés</h2>
+    ${shodanFindings.length
+      ? `<table>
+          <thead><tr><th>IP</th><th>Port</th><th>Service</th><th>Version</th><th>Sévérité</th></tr></thead>
+          <tbody>${shodanFindings.map(f => {
+            const bannerParts = (f.service_banner || '').split(' ').filter(Boolean);
+            const critical = ARGUS_SHODAN_CRITICAL_PORTS.includes(Number(f.port));
+            return `<tr class="${critical ? 'critical' : ''}">
+              <td>${escHtml(f.ip)}</td>
+              <td>${escHtml(f.port)}</td>
+              <td>${escHtml(bannerParts[0] || '—')}</td>
+              <td>${escHtml(bannerParts.slice(1).join(' ') || '—')}</td>
+              <td>${f.severity === 'critical' ? '<span class="badge-red">CRITIQUE</span>' : f.severity === 'high' ? '<span class="badge-orange">HIGH</span>' : '<span class="badge-yellow">MEDIUM</span>'}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>`
+      : `<p><span class="badge-green">✓</span> Aucun service sensible exposé détecté.</p>`}`;
+
   // ── Section 5 : recommandations ──
   const recos = [];
   const openFindings = findings.filter(f => !['false_positive', 'remediated'].includes(f.status));
@@ -4763,6 +4992,23 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
   rows.filter(g => g.tls?.daysUntilExpiry != null && g.tls.daysUntilExpiry >= 30 && g.tls.daysUntilExpiry < 60).forEach(g => recos.push({ level: 'high-priority', text: 'Planification renouvellement certificat TLS', asset: g.assetValue, delay: '< 30 jours' }));
 
   if (subdomains.length > 5) recos.push({ level: 'low', text: 'Inventaire et revue du périmètre exposé', asset: `${subdomains.length} sous-domaines`, delay: '< 60 jours' });
+
+  // Règles ajoutées pour HIBP/Shodan/WHOIS/ASN — sévérité Shodan lue depuis
+  // f.severity (déjà calculée côté backend, voir shodanSeverityForPort dans
+  // src/agents/argus.js), jamais recalculée ici à partir d'une liste de ports
+  // dupliquée : la consigne cite (21,23,3389) pour CRITIQUE et (8080,9200)
+  // pour ÉLEVÉ, qui sont un sous-ensemble exact de SHODAN_CRITICAL_PORTS/
+  // SHODAN_HIGH_PORTS déjà utilisés pour assigner cette sévérité en base.
+  shodanFindings.filter(f => f.severity === 'critical').forEach(f => recos.push({ level: 'critical', text: `Service critique exposé (port ${f.port}) — accès à restreindre ou désactiver immédiatement.`, asset: f.ip, delay: 'Immédiat' }));
+  hibpBreaches.filter(b => (b.data_classes || []).includes('Passwords')).forEach(b => recos.push({ level: 'critical', text: `Fuite de mots de passe détectée (${b.breach_name}) — forcer la réinitialisation des identifiants concernés.`, asset: domain, delay: 'Immédiat' }));
+
+  if (whois?.daysUntilExpiry != null && whois.daysUntilExpiry < 90) recos.push({ level: 'high-priority', text: 'Renouvellement du nom de domaine à anticiper', asset: domain, delay: '< 90 jours' });
+  shodanFindings.filter(f => f.severity === 'high').forEach(f => recos.push({ level: 'high-priority', text: `Service exposé à risque élevé (port ${f.port}) — restreindre l'accès.`, asset: f.ip, delay: '< 30 jours' }));
+
+  if (intel?.asn?.length && intel.asn.every(a => a.isHosting)) {
+    const providers = new Set(intel.asn.map(a => a.asnName).filter(Boolean));
+    if (providers.size === 1) recos.push({ level: 'low', text: 'Infrastructure concentrée chez un seul hébergeur cloud — risque de dépendance unique (SPOF fournisseur).', asset: [...providers][0], delay: '< 90 jours' });
+  }
 
   const recosRows = recos.length
     ? recos.map(r => `<tr><td>${argusPdfPriorityBadge(r.level)}</td><td>${escHtml(r.text)}</td><td>${escHtml(r.asset)}</td><td>${escHtml(r.delay)}</td></tr>`).join('')
@@ -4852,6 +5098,12 @@ ${prospectBanner}
 
 <h2>4. Exposition de Credentials — Sources Publiques</h2>
 ${githubSection}
+
+${techStackSectionPdf}
+${whoisSectionPdf}
+${asnSectionPdf}
+${hibpSectionPdf}
+${shodanSectionPdf}
 
 <h2>5. Recommandations Prioritaires</h2>
 <table>
