@@ -1313,7 +1313,7 @@ select.form-input option{background:var(--surface)}
               <div class="val" id="argus-report-score-val">—</div>
               <div class="lbl">Score d'exposition</div>
             </div>
-            <button class="action-btn" onclick="argusExportScanReport()">🖨 Exporter le rapport</button>
+            <button class="action-btn primary" id="argus-pdf-btn" style="margin-top:0" onclick="argusGeneratePDFReport()">📄 Générer rapport PDF</button>
           </div>
         </div>
         <div id="argus-report-prospect-banner" style="display:none"></div>
@@ -4479,7 +4479,12 @@ async function argusScanStart() {
   }
 }
 
-function argusRenderScanReport({ companyName, domain, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets = [] }) {
+// Regroupe les external_assets (subdomain/certificate/service, une ligne par
+// asset_kind) par asset_value — un seul "actif logique" par sous-domaine avec
+// ses IPs/TLS/headers/CVEs. Partagée entre argusRenderScanReport (affichage
+// écran) et argusGeneratePDFReport (rapport imprimable) — même logique,
+// jamais dupliquée.
+function argusGroupAssetsByValue(assets, exposures) {
   const assetsById = new Map(assets.map(a => [a.id, a]));
   const groups = new Map();
   for (const a of assets) {
@@ -4493,7 +4498,18 @@ function argusRenderScanReport({ companyName, domain, assets, exposures, finding
     const owner = assetsById.get(e.asset_id);
     if (owner && groups.has(owner.asset_value)) groups.get(owner.asset_value).cves.push(e);
   }
-  const rows = [...groups.values()];
+  return [...groups.values()];
+}
+
+// Dernier scan rendu à l'écran — utilisé par argusGeneratePDFReport (le bouton
+// "Générer rapport PDF" n'a pas d'objet scanData en argument inline, il lit
+// cette variable globale ; plus robuste qu'un onclick="...(scanData)" qui
+// exigerait de sérialiser tout l'objet dans un attribut HTML).
+let argusLastScanData = null;
+
+function argusRenderScanReport({ companyName, domain, scopeId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets = [] }) {
+  argusLastScanData = { companyName, domain, scopeId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets };
+  const rows = argusGroupAssetsByValue(assets, exposures);
 
   const cvssBadgeClass = n => n >= 9 ? 'critical' : n >= 7 ? 'high' : n >= 4 ? 'medium' : 'low';
   const surfaceRows = rows.length ? rows.map(g => {
@@ -4600,36 +4616,280 @@ function argusRenderScanReport({ companyName, domain, assets, exposures, finding
   }
 }
 
-function argusExportScanReport() {
-  const content = document.getElementById('argus-report-content').innerHTML;
-  const title = document.getElementById('argus-report-title').textContent;
-  const meta = document.getElementById('argus-report-meta').textContent;
-  const score = document.getElementById('argus-report-score-val').textContent;
-  const win = window.open('', '_blank');
-  if (!win) { showToast('⚠ Pop-up bloquée — autorisez les pop-ups pour exporter'); return; }
-  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Rapport ARGUS — ${title}</title>
-    <style>
-      *{box-sizing:border-box;color:#000 !important;background:transparent !important}
-      body{background:#fff !important;font-family:'JetBrains Mono',monospace;padding:32px;font-size:12px}
-      h1{font-size:18px;margin:0 0 4px}
-      h4{font-size:12px;text-transform:uppercase;letter-spacing:.06em;margin:22px 0 8px;border-bottom:1px solid #000;padding-bottom:4px}
-      table{width:100%;border-collapse:collapse;margin-bottom:10px;background:#fff !important}
-      th,td{border:1px solid #000;padding:6px 8px;text-align:left;font-size:11px;background:#fff !important}
-      th{background:#eee !important}
-      .sev-badge,.status-pill{border:1px solid #000;padding:2px 6px;border-radius:2px}
-      .argus-clean-badge{border:1px solid #000;padding:8px 12px;display:inline-block}
-      .argus-reco-item{border:1px solid #000;padding:8px;margin-bottom:6px;list-style:none}
-      .argus-report-note{font-style:italic;margin-top:6px}
-      @media print{body{padding:12px}}
-    </style>
-  </head><body>
-    <h1>${escHtml(title)}</h1>
-    <div>${escHtml(meta)} — Score d'exposition : ${escHtml(score)}</div>
-    ${content}
-  </body></html>`);
-  win.document.close();
-  win.focus();
-  setTimeout(() => win.print(), 300);
+// ════════════════════════════════════════════
+// ARGUS — Rapport PDF professionnel (executive summary IA + 6 sections)
+// ════════════════════════════════════════════
+//
+// Remplace l'ancien argusExportScanReport() (copie brute du rendu écran) par
+// un vrai document de rapport, construit indépendamment du DOM affiché à
+// l'écran — mise en page dédiée à l'impression (Ctrl+P / Enregistrer en PDF),
+// pas un simple clone de argus-report-content.
+
+const ARGUS_PDF_FALLBACK_SUMMARY = `Cette évaluation de reconnaissance passive a permis d'identifier la surface d'attaque exposée publiquement pour l'organisation analysée. Les résultats mettent en évidence les actifs numériques accessibles depuis Internet (sous-domaines, certificats TLS, services HTTP) ainsi qu'une recherche de credentials potentiellement divulgués sur des dépôts de code publics.
+
+Cette analyse strictement passive ne constitue pas un audit de sécurité complet : elle offre une première photographie du périmètre exposé, sans aucune interaction active avec les systèmes de l'organisation. Les éléments identifiés — certificats proches de l'expiration, services révélant des informations techniques, ou credentials potentiellement exposés — représentent des points d'attention à traiter selon leur criticité réelle pour l'activité.
+
+Sore Security recommande la mise en place d'une surveillance continue de la surface d'attaque ainsi qu'un audit de sécurité approfondi, afin de qualifier précisément le niveau de risque et de prioriser les actions correctives à mener.`;
+
+/**
+ * Signature réelle de POST /api/ai/chat (vérifiée dans src/index.js avant
+ * d'écrire cette fonction) : body `{ messages: [{role,content}], clientContext }`,
+ * PAS `{ message: "..." }` — et la réponse est `{ content, usage }`, pas un
+ * texte brut. Adapté à la route réelle, même route que sendMessage() (chat
+ * ARIA) plus haut dans ce fichier.
+ */
+async function argusGenerateExecutiveSummary(scanData) {
+  const { companyName, domain, assets, findings } = scanData;
+  const subdomains = [...new Set(assets.filter(a => a.asset_kind === 'subdomain').map(a => a.asset_value))];
+  const criticalPoints = [];
+  if (findings.some(f => f.confidence === 'high')) criticalPoints.push('credentials à haute confiance exposés publiquement');
+  if (assets.some(a => a.asset_kind === 'certificate' && a.details?.expiringSoon)) criticalPoints.push('certificat(s) TLS proche(s) de l\'expiration');
+  if (assets.some(a => a.asset_kind === 'subdomain' && a.asset_value.startsWith('ftp.'))) criticalPoints.push('service FTP actif détecté');
+  if (assets.some(a => a.asset_kind === 'subdomain' && a.asset_value.startsWith('staging.'))) criticalPoints.push('environnement de staging exposé publiquement');
+  if (!criticalPoints.length) criticalPoints.push('aucun point critique majeur identifié à ce stade');
+
+  const prompt = `Tu es un expert en cybersécurité. Génère un executive summary professionnel en français (10-15 lignes) pour un rapport de reconnaissance passive sur ${companyName} (${domain}).
+Données du scan :
+Surface d'attaque : ${assets.length} actif(s) découvert(s) dont sous-domaines : ${subdomains.length ? subdomains.join(', ') : 'aucun'}.
+Findings GitHub : ${findings.length} credential(s) potentiellement exposé(s).
+Points critiques : ${criticalPoints.join(', ')}.
+Le résumé doit être adapté à un RSSI, mentionner les risques métier, et recommander un audit approfondi par Sore Security.
+NE PAS mentionner de noms de vendors IA ou d'outils tiers.`;
+
+  const res = await argusScanFetch('/ai/chat', {
+    method: 'POST',
+    body: JSON.stringify({ messages: [{ role: 'user', content: prompt }] }),
+  }, 20000, false);
+
+  if (res.ok && res.data?.content) return res.data.content;
+  return ARGUS_PDF_FALLBACK_SUMMARY;
+}
+
+// Trois échelles distinctes, gardées séparées plutôt qu'une seule fonction à
+// clés ambiguës : confiance d'un finding GitHub (section 4), priorité d'une
+// recommandation (section 5, 3 niveaux CRITIQUE/ÉLEVÉ/MOYEN), risque d'un
+// actif dans le tableau de surface (section 3, seulement 2 niveaux + OK).
+function argusPdfConfidenceBadge(confidence) {
+  const cls = confidence === 'high' ? 'badge-red' : 'badge-orange'; // 'low' jamais stocké en base (filtré avant insertion), voir searchGithubLeaks
+  return `<span class="${cls}">${escHtml((confidence || '').toUpperCase())}</span>`;
+}
+function argusPdfPriorityBadge(level) {
+  if (level === 'critical') return '<span class="badge-red">CRITIQUE</span>';
+  if (level === 'high-priority') return '<span class="badge-orange">ÉLEVÉ</span>';
+  return '<span class="badge-yellow">MOYEN</span>';
+}
+function argusPdfRiskBadge(level) {
+  if (level === 'critical') return '<span class="badge-red">CRITIQUE</span>';
+  if (level === 'high-priority') return '<span class="badge-orange">À SURVEILLER</span>';
+  return '<span class="badge-green">OK</span>';
+}
+
+function argusPdfTlsStatusBadge(days) {
+  if (days == null) return '<span class="badge-green">OK</span>';
+  if (days < 30) return '<span class="badge-red">CRITIQUE</span>';
+  if (days < 60) return '<span class="badge-orange">À SURVEILLER</span>';
+  return '<span class="badge-green">OK</span>';
+}
+
+/** Construit le document HTML complet de la fenêtre imprimable — indépendant du DOM affiché à l'écran. */
+function argusBuildPdfReportHtml(scanData, summaryText) {
+  const { companyName, domain, assets, exposures, findings, clientStatus } = scanData;
+  const rows = argusGroupAssetsByValue(assets, exposures);
+  const scanDate = new Date();
+  const scanDateLabel = scanDate.toLocaleDateString('fr-FR', { year: 'numeric', month: 'long', day: 'numeric' });
+  const yyyymmdd = scanDate.toISOString().slice(0, 10).replace(/-/g, '');
+  const reference = `ASA-${yyyymmdd}-${String(Math.floor(1000 + Math.random() * 9000))}`;
+  const subdomains = [...new Set(assets.filter(a => a.asset_kind === 'subdomain').map(a => a.asset_value))];
+
+  // ── Section 3 : surface d'attaque ──
+  const surfaceRows = rows.length ? rows.map(g => {
+    const isFtp = g.assetValue.startsWith('ftp.');
+    const hasHeaders = g.headers && Object.keys(g.headers).length > 0;
+    const tlsExpiringUnder60 = g.tls?.daysUntilExpiry != null && g.tls.daysUntilExpiry < 60;
+    const rowClass = isFtp || tlsExpiringUnder60 ? 'critical' : hasHeaders ? 'high' : '';
+    const tlsCell = g.tls
+      ? `${escHtml(g.tls.issuer || '—')} · expire dans ${g.tls.daysUntilExpiry ?? '?'} j.`
+      : '—';
+    const headersCell = hasHeaders ? escHtml(Object.entries(g.headers).map(([k, v]) => `${k}: ${v}`).join(', ')) : 'aucun';
+    const riskCell = isFtp || tlsExpiringUnder60 ? argusPdfRiskBadge('critical') : hasHeaders ? argusPdfRiskBadge('high-priority') : argusPdfRiskBadge('ok');
+    return `<tr class="${rowClass}">
+      <td>${escHtml(g.assetValue)}</td>
+      <td>${g.assetValue === domain ? 'Domaine racine' : 'Sous-domaine'}</td>
+      <td>${g.ips.length ? escHtml(g.ips.join(', ')) : '—'}</td>
+      <td>${tlsCell}</td>
+      <td>${headersCell}</td>
+      <td>${riskCell}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="6">Aucun actif découvert.</td></tr>`;
+
+  const tlsRows = rows.filter(g => g.tls).length
+    ? rows.filter(g => g.tls).map(g => `<tr>
+        <td>${escHtml(g.assetValue)}</td>
+        <td>${escHtml(g.tls.issuer || '—')}</td>
+        <td>${g.tls.daysUntilExpiry != null ? escHtml(new Date(Date.now() + g.tls.daysUntilExpiry * 86400000).toLocaleDateString('fr-FR')) : '—'}</td>
+        <td>${g.tls.daysUntilExpiry ?? '—'}</td>
+        <td>${argusPdfTlsStatusBadge(g.tls.daysUntilExpiry)}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="5">Aucun certificat TLS analysé.</td></tr>`;
+
+  // ── Section 4 : GitHub ──
+  const githubSection = findings.length
+    ? `<p><em>Les extraits ci-dessous sont partiellement masqués. Les valeurs complètes ne sont jamais stockées ni transmises.</em></p>
+      <table>
+        <thead><tr><th>Repo</th><th>Fichier</th><th>Type</th><th>Confiance</th><th>Extrait masqué</th><th>Statut</th></tr></thead>
+        <tbody>${findings.map(f => `<tr class="${f.confidence === 'high' ? 'critical' : f.confidence === 'medium' ? 'high' : ''}">
+          <td>${escHtml(f.repo_url)}</td>
+          <td>${escHtml(f.file_path)}</td>
+          <td>${escHtml(f.finding_type)}</td>
+          <td>${argusPdfConfidenceBadge(f.confidence)}</td>
+          <td>${escHtml(f.matched_snippet)}</td>
+          <td>${escHtml(f.status)}</td>
+        </tr>`).join('')}</tbody>
+      </table>`
+    : `<p><span class="badge-green">✓</span> Aucun credential exposé détecté sur les repositories publics analysés.</p>`;
+
+  // ── Section 5 : recommandations ──
+  const recos = [];
+  const openFindings = findings.filter(f => !['false_positive', 'remediated'].includes(f.status));
+  openFindings.filter(f => f.confidence === 'high').forEach(f => recos.push({ level: 'critical', text: 'Rotation immédiate des secrets exposés', asset: `${f.repo_url} — ${f.file_path}`, delay: 'Immédiat' }));
+  if (assets.some(a => a.asset_kind === 'subdomain' && a.asset_value.startsWith('ftp.')))
+    recos.push({ level: 'critical', text: 'Désactivation du serveur FTP — migration vers SFTP/FTPS', asset: assets.find(a => a.asset_kind === 'subdomain' && a.asset_value.startsWith('ftp.')).asset_value, delay: 'Immédiat' });
+  rows.filter(g => g.tls?.daysUntilExpiry != null && g.tls.daysUntilExpiry < 30).forEach(g => recos.push({ level: 'critical', text: 'Renouvellement urgent du certificat TLS', asset: g.assetValue, delay: '< 7 jours' }));
+
+  if (assets.some(a => a.asset_kind === 'subdomain' && a.asset_value.startsWith('staging.')))
+    recos.push({ level: 'high-priority', text: 'Restriction accès staging (VPN/IP whitelist)', asset: assets.find(a => a.asset_kind === 'subdomain' && a.asset_value.startsWith('staging.')).asset_value, delay: '< 15 jours' });
+  rows.filter(g => g.headers && Object.keys(g.headers).length > 0).forEach(g => recos.push({ level: 'high-priority', text: 'Masquage des headers de fingerprinting', asset: g.assetValue, delay: '< 30 jours' }));
+  openFindings.filter(f => f.confidence === 'medium').forEach(f => recos.push({ level: 'high-priority', text: 'Audit des repositories et rotation préventive', asset: `${f.repo_url} — ${f.file_path}`, delay: '< 30 jours' }));
+  rows.filter(g => g.tls?.daysUntilExpiry != null && g.tls.daysUntilExpiry >= 30 && g.tls.daysUntilExpiry < 60).forEach(g => recos.push({ level: 'high-priority', text: 'Planification renouvellement certificat TLS', asset: g.assetValue, delay: '< 30 jours' }));
+
+  if (subdomains.length > 5) recos.push({ level: 'low', text: 'Inventaire et revue du périmètre exposé', asset: `${subdomains.length} sous-domaines`, delay: '< 60 jours' });
+
+  const recosRows = recos.length
+    ? recos.map(r => `<tr><td>${argusPdfPriorityBadge(r.level)}</td><td>${escHtml(r.text)}</td><td>${escHtml(r.asset)}</td><td>${escHtml(r.delay)}</td></tr>`).join('')
+    : `<tr><td colspan="4">Aucune action corrective urgente identifiée à ce stade.</td></tr>`;
+
+  const prospectBanner = clientStatus === 'prospect'
+    ? `<div class="prospect-banner">Ce rapport est établi dans le cadre d'une évaluation préliminaire. Aucun système n'a été sollicité activement — reconnaissance passive uniquement.</div>`
+    : '';
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Rapport ARGUS — ${escHtml(companyName)}</title>
+<style>
+body { font-family: Georgia, serif; color: #1a1a1a; margin: 40px; }
+h1 { font-size: 24px; color: #1a2b5e; border-bottom: 2px solid #1a2b5e; padding-bottom: 8px; }
+h2 { font-size: 16px; color: #1a2b5e; margin-top: 30px; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+th { background: #1a2b5e; color: white; padding: 8px; text-align: left; }
+td { padding: 6px 8px; border: 1px solid #ddd; }
+tr:nth-child(even) { background: #f8f8f8; }
+.critical { background: #fee2e2 !important; }
+.high { background: #fef3c7 !important; }
+.badge-red { background:#dc2626; color:white; padding:2px 8px; border-radius:4px; font-size:11px; }
+.badge-orange { background:#ea580c; color:white; padding:2px 8px; border-radius:4px; font-size:11px; }
+.badge-green { background:#16a34a; color:white; padding:2px 8px; border-radius:4px; font-size:11px; }
+.badge-yellow { background:#ca8a04; color:white; padding:2px 8px; border-radius:4px; font-size:11px; }
+.header-block { border: 2px solid #1a2b5e; padding: 20px; margin-bottom: 30px; }
+.header-block table { margin: 0; }
+.header-block td { border: none; padding: 3px 0; }
+.confidentiel { color: #dc2626; font-weight: bold; letter-spacing: 2px; }
+.prospect-banner { background:#fef3c7; border:1px solid #f59e0b; padding:10px; margin:10px 0; }
+.ascii-logo { font-family: 'Courier New', monospace; font-size: 11px; white-space: pre; line-height: 1.1; color: #1a2b5e; }
+footer { margin-top: 40px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 10px; color: #666; text-align: center; }
+@media print {
+  @page { margin: 20mm; }
+  body { margin: 0; }
+  .no-print { display: none; }
+  h2 { page-break-after: avoid; }
+  table { page-break-inside: avoid; }
+  footer { position: fixed; bottom: 0; width: 100%; font-size: 10px;
+           color: #666; text-align: center; border-top: 1px solid #ddd; }
+}
+</style>
+</head><body>
+
+<div class="header-block">
+  <table>
+    <tr><td style="width:60%"><strong style="font-size:20px;color:#1a2b5e">SORE SECURITY</strong><br>Rapport de Reconnaissance Passive<br>Attack Surface Assessment</td>
+        <td class="ascii-logo">┌────────────┐
+│ SORE       │
+│ SECURITY   │
+└────────────┘</td></tr>
+  </table>
+  <hr style="border:none;border-top:1px solid #1a2b5e;margin:14px 0">
+  <table>
+    <tr><td style="width:160px"><strong>Référence</strong></td><td>${escHtml(reference)}</td></tr>
+    <tr><td><strong>Société</strong></td><td>${escHtml(companyName)}</td></tr>
+    <tr><td><strong>Domaine</strong></td><td>${escHtml(domain)}</td></tr>
+    <tr><td><strong>Date</strong></td><td>${escHtml(scanDateLabel)}</td></tr>
+    <tr><td><strong>Analyste</strong></td><td>Plateforme d'intelligence souveraine</td></tr>
+    <tr><td><strong>Classification</strong></td><td class="confidentiel">CONFIDENTIEL</td></tr>
+  </table>
+</div>
+
+<h2>1. Résumé Exécutif</h2>
+${prospectBanner}
+<p>${escHtml(summaryText).replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>')}</p>
+
+<h2>2. Périmètre et Méthodologie</h2>
+<table>
+  <tr><td style="width:220px"><strong>Périmètre analysé</strong></td><td>${escHtml(domain)} et sous-domaines</td></tr>
+  <tr><td><strong>Méthode</strong></td><td>Reconnaissance passive (OSINT)</td></tr>
+  <tr><td><strong>Sources</strong></td><td>DNS public, TLS/SSL, headers HTTP, repositories publics</td></tr>
+  <tr><td><strong>Date d'analyse</strong></td><td>${escHtml(scanDateLabel)}</td></tr>
+  <tr><td><strong>Durée</strong></td><td>Passive — aucun scan intrusif</td></tr>
+</table>
+
+<h2>3. Surface d'Attaque Découverte</h2>
+<table>
+  <thead><tr><th>Actif</th><th>Type</th><th>IPs</th><th>TLS</th><th>Headers exposés</th><th>Risque</th></tr></thead>
+  <tbody>${surfaceRows}</tbody>
+</table>
+
+<h3>Analyse des certificats TLS</h3>
+<table>
+  <thead><tr><th>Domaine</th><th>Émetteur</th><th>Valide jusqu'au</th><th>Jours restants</th><th>Statut</th></tr></thead>
+  <tbody>${tlsRows}</tbody>
+</table>
+
+<h2>4. Exposition de Credentials — Sources Publiques</h2>
+${githubSection}
+
+<h2>5. Recommandations Prioritaires</h2>
+<table>
+  <thead><tr><th>Priorité</th><th>Recommandation</th><th>Actif concerné</th><th>Délai suggéré</th></tr></thead>
+  <tbody>${recosRows}</tbody>
+</table>
+
+<h2>6. Conclusion</h2>
+<p>Cette évaluation de reconnaissance passive révèle ${assets.length} actif(s) exposé(s) et ${findings.length} finding(s) de sécurité. Sore Security recommande la mise en place d'un programme de surveillance continue de la surface d'attaque ainsi qu'un audit approfondi des points identifiés.</p>
+<p>Pour toute question ou pour approfondir cette évaluation :<br>contact@sore-security.com — sore-security.com</p>
+
+<footer>
+  Sore Security — Confidentiel — © 2026 — sore-security.com<br>
+  Ce rapport est destiné exclusivement à ${escHtml(companyName)}
+</footer>
+
+</body></html>`;
+}
+
+async function argusGeneratePDFReport() {
+  if (!argusLastScanData) { showToast('⚠ Aucune donnée de scan disponible — relancez un scan d\'abord'); return; }
+  const btn = document.getElementById('argus-pdf-btn');
+  const originalLabel = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Génération du rapport en cours...';
+  try {
+    const summaryText = await argusGenerateExecutiveSummary(argusLastScanData);
+    const html = argusBuildPdfReportHtml(argusLastScanData, summaryText);
+    const win = window.open('', '_blank');
+    if (!win) { showToast('⚠ Pop-up bloquée — autorisez les pop-ups pour générer le rapport'); return; }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 800);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalLabel;
+  }
 }
 
 // ════════════════════════════════════════════
