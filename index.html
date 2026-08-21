@@ -4532,7 +4532,7 @@ function argusRenderScanReport({ companyName, domain, assets, exposures, finding
         </tr>`).join('')}</tbody>
       </table></div>
       <div class="argus-report-note">Les valeurs sensibles ne sont jamais affichées — seul un extrait rédigé est conservé. En cas de finding confirmé, contacter le client pour rotation immédiate du secret.</div>`
-    : `<div class="argus-clean-badge">✓ Aucun credential exposé détecté</div>`;
+    : `<div class="argus-clean-badge">✓ Aucun credential exposé détecté sur les repos publics analysés</div>`;
   const githubTimeoutNote = githubTimedOutAssets.length
     ? `<div class="argus-report-note" style="color:var(--amber)">⚠ Scan GitHub interrompu pour ${githubTimedOutAssets.map(v => escHtml(v)).join(', ')} — relancer si nécessaire.</div>`
     : '';
