@@ -200,6 +200,26 @@ body::after{
 .tb-btn.active{color:var(--cyan);background:var(--cyan-dim);border-color:rgba(0,180,220,0.25)}
 .tb-icon{font-size:14px}
 
+/* ── NAV GROUPÉE — menus déroulants (regroupement des 18 onglets en 6 entrées) ── */
+.tb-dropdown{position:relative}
+.tb-dropdown-btn{user-select:none}
+.tb-dropdown-caret{font-size:9px;margin-left:1px;transition:transform .2s}
+.tb-dropdown.open .tb-dropdown-caret{transform:rotate(180deg)}
+.tb-dropdown-menu{
+  position:absolute;top:100%;left:0;margin-top:6px;min-width:210px;
+  background:var(--surface);border:1px solid var(--line);border-radius:2px;padding:6px;
+  display:none;flex-direction:column;gap:2px;
+  box-shadow:0 12px 32px rgba(0,0,0,.5);z-index:200;
+}
+.tb-dropdown.open .tb-dropdown-menu{display:flex}
+.tb-dropdown-item{
+  display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:2px;cursor:pointer;
+  font-family:var(--font-display);font-size:12px;font-weight:600;letter-spacing:.03em;
+  color:var(--text-dim);text-transform:uppercase;transition:.15s;
+}
+.tb-dropdown-item:hover{color:var(--text-bright);background:var(--line2)}
+.tb-dropdown-item.active{color:var(--cyan);background:var(--cyan-dim)}
+
 .tb-right{display:flex;align-items:center;gap:12px;margin-left:auto}
 .soc-badge{
   display:flex;align-items:center;gap:6px;
@@ -600,6 +620,29 @@ select.form-input option{background:var(--surface)}
 .cap-icon{font-size:14px;width:20px;text-align:center;flex-shrink:0;margin-top:1px}
 .cap-text{font-family:var(--font-mono);font-size:10px;color:var(--text-dim);line-height:1.5}
 
+/* ── ARIA — bulle flottante (hors nav, toujours accessible) ── */
+.aria-bubble{
+  position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;
+  background:linear-gradient(135deg,var(--cyan),#003366);
+  display:flex;align-items:center;justify-content:center;font-size:22px;
+  cursor:pointer;box-shadow:0 4px 20px rgba(0,180,220,.45);z-index:9997;transition:.2s;
+}
+.aria-bubble:hover{transform:scale(1.08)}
+.aria-float-panel{
+  position:fixed;bottom:94px;right:24px;width:440px;max-width:calc(100vw - 32px);
+  height:640px;max-height:calc(100vh - 130px);
+  background:var(--void);border:1px solid var(--line);border-radius:6px;
+  box-shadow:0 24px 64px rgba(0,0,0,.6);z-index:9998;
+  display:none;flex-direction:column;overflow:hidden;
+}
+.aria-float-panel.open{display:flex}
+.aria-float-panel .section-header{padding:14px 16px;margin-bottom:0;position:relative;flex-shrink:0}
+.aria-float-panel .chat-wrapper{flex:1;min-height:0;display:flex;padding:12px;height:auto;max-height:none}
+.aria-float-panel .chat-main{flex:1;min-width:0}
+.aria-float-panel .chat-sidebar{display:none} /* pas de place utile dans un panneau flottant de 440px — contenu conservé dans le DOM, juste masqué ici */
+.aria-panel-close{position:absolute;top:16px;right:16px;cursor:pointer;color:var(--text-dim);font-size:18px;line-height:1;transition:.2s}
+.aria-panel-close:hover{color:var(--red)}
+
 /* ── REPORTS ── */
 .reports-toolbar{display:flex;align-items:center;gap:12px;margin-bottom:18px}
 .search-input{
@@ -780,23 +823,52 @@ select.form-input option{background:var(--surface)}
     </div>
     <nav class="tb-nav">
       <div class="tb-btn active" onclick="nav('dashboard')" data-page="dashboard"><span class="tb-icon">⬡</span><span>War Room</span></div>
-      <div class="tb-btn" onclick="nav('soc')" data-page="soc"><span class="tb-icon">◉</span><span>SOC</span></div>
-      <div class="tb-btn" onclick="nav('logs')" data-page="logs"><span class="tb-icon">▤</span><span>Logs</span></div>
-      <div class="tb-btn" onclick="nav('threatintel')" data-page="threatintel"><span class="tb-icon">🛰</span><span>Threat Intel</span></div>
-      <div class="tb-btn" onclick="nav('usecases')" data-page="usecases"><span class="tb-icon">⚙</span><span>Use Cases</span></div>
-      <div class="tb-btn" onclick="nav('playbooks')" data-page="playbooks"><span class="tb-icon">🎭</span><span>Playbooks</span></div>
-      <div class="tb-btn" onclick="nav('cases')" data-page="cases"><span class="tb-icon">🗂</span><span>Cases</span></div>
-      <div class="tb-btn" onclick="nav('automation')" data-page="automation"><span class="tb-icon">⚡</span><span>Automation</span></div>
-      <div class="tb-btn" onclick="nav('atlas')" data-page="atlas"><span class="tb-icon">🗺</span><span>ATLAS</span></div>
-      <div class="tb-btn" onclick="nav('argus')" data-page="argus"><span class="tb-icon">🎯</span><span>Exposition</span></div>
-      <div class="tb-btn" onclick="nav('janus')" data-page="janus"><span class="tb-icon">🔑</span><span>IAM</span></div>
-      <div class="tb-btn" onclick="nav('integrations')" data-page="integrations"><span class="tb-icon">🔌</span><span>Intégrations</span></div>
-      <div class="tb-btn" onclick="nav('chronicle')" data-page="chronicle"><span class="tb-icon">📜</span><span>Chronicle</span></div>
-      <div class="tb-btn" onclick="nav('reports')" data-page="reports"><span class="tb-icon">▦</span><span>Rapports</span></div>
-      <div class="tb-btn" onclick="nav('services')" data-page="services"><span class="tb-icon">◈</span><span>Services</span></div>
-      <div class="tb-btn" onclick="nav('commande')" data-page="commande"><span class="tb-icon">◇</span><span>Commander</span></div>
-      <div class="tb-btn" onclick="nav('augur')" data-page="augur"><span class="tb-icon">🔮</span><span>AUGUR</span></div>
-      <div class="tb-btn" onclick="nav('ai')" data-page="ai"><span class="tb-icon">⬡</span><span>ARIA IA</span></div>
+
+      <div class="tb-dropdown" data-group="soc">
+        <div class="tb-btn tb-dropdown-btn" onclick="toggleTbDropdown(event,'soc')"><span class="tb-icon">◉</span><span>SOC</span><span class="tb-dropdown-caret">▾</span></div>
+        <div class="tb-dropdown-menu">
+          <div class="tb-dropdown-item" onclick="nav('soc')" data-page="soc"><span class="tb-icon">◉</span><span>Alertes SOC</span></div>
+          <div class="tb-dropdown-item" onclick="nav('logs')" data-page="logs"><span class="tb-icon">▤</span><span>Logs</span></div>
+          <div class="tb-dropdown-item" onclick="nav('usecases')" data-page="usecases"><span class="tb-icon">⚙</span><span>Use Cases</span></div>
+          <div class="tb-dropdown-item" onclick="nav('playbooks')" data-page="playbooks"><span class="tb-icon">🎭</span><span>Playbooks</span></div>
+          <div class="tb-dropdown-item" onclick="nav('chronicle')" data-page="chronicle"><span class="tb-icon">📜</span><span>Chronicle</span></div>
+        </div>
+      </div>
+
+      <div class="tb-dropdown" data-group="threatintel">
+        <div class="tb-btn tb-dropdown-btn" onclick="toggleTbDropdown(event,'threatintel')"><span class="tb-icon">🛰</span><span>Threat Intel</span><span class="tb-dropdown-caret">▾</span></div>
+        <div class="tb-dropdown-menu">
+          <div class="tb-dropdown-item" onclick="nav('threatintel')" data-page="threatintel"><span class="tb-icon">🛰</span><span>Threat Intel</span></div>
+          <div class="tb-dropdown-item" onclick="nav('atlas')" data-page="atlas"><span class="tb-icon">🗺</span><span>ATLAS</span></div>
+          <div class="tb-dropdown-item" onclick="nav('argus')" data-page="argus"><span class="tb-icon">🎯</span><span>Exposition</span></div>
+        </div>
+      </div>
+
+      <div class="tb-dropdown" data-group="gestion">
+        <div class="tb-btn tb-dropdown-btn" onclick="toggleTbDropdown(event,'gestion')"><span class="tb-icon">🗂</span><span>Gestion</span><span class="tb-dropdown-caret">▾</span></div>
+        <div class="tb-dropdown-menu">
+          <div class="tb-dropdown-item" onclick="nav('cases')" data-page="cases"><span class="tb-icon">🗂</span><span>Cases</span></div>
+          <div class="tb-dropdown-item" onclick="nav('automation')" data-page="automation"><span class="tb-icon">⚡</span><span>Automation</span></div>
+        </div>
+      </div>
+
+      <div class="tb-dropdown" data-group="iam">
+        <div class="tb-btn tb-dropdown-btn" onclick="toggleTbDropdown(event,'iam')"><span class="tb-icon">🔑</span><span>IAM</span><span class="tb-dropdown-caret">▾</span></div>
+        <div class="tb-dropdown-menu">
+          <div class="tb-dropdown-item" onclick="nav('janus')" data-page="janus"><span class="tb-icon">🔑</span><span>Identités</span></div>
+          <div class="tb-dropdown-item" onclick="nav('integrations')" data-page="integrations"><span class="tb-icon">🔌</span><span>Intégrations</span></div>
+        </div>
+      </div>
+
+      <div class="tb-dropdown" data-group="business">
+        <div class="tb-btn tb-dropdown-btn" onclick="toggleTbDropdown(event,'business')"><span class="tb-icon">💼</span><span>Business</span><span class="tb-dropdown-caret">▾</span></div>
+        <div class="tb-dropdown-menu">
+          <div class="tb-dropdown-item" onclick="nav('augur')" data-page="augur"><span class="tb-icon">🔮</span><span>AUGUR</span></div>
+          <div class="tb-dropdown-item" onclick="nav('services')" data-page="services"><span class="tb-icon">◈</span><span>Services</span></div>
+          <div class="tb-dropdown-item" onclick="nav('commande')" data-page="commande"><span class="tb-icon">◇</span><span>Commander</span></div>
+          <div class="tb-dropdown-item" onclick="nav('reports')" data-page="reports"><span class="tb-icon">▦</span><span>Rapports</span></div>
+        </div>
+      </div>
     </nav>
     <div class="tb-right">
       <div class="soc-badge"><div class="pulse-dot"></div>SOC LIVE · MAROC</div>
@@ -1746,65 +1818,73 @@ select.form-input option{background:var(--surface)}
       </div>
     </div>
 
-    <!-- ══ AI CHAT ══ -->
-    <div class="page" id="page-ai">
-      <div class="section-header">
-        <div><div class="section-title">ARIA — IA Cybersécurité</div><div class="section-sub">Advanced Risk Intelligence Analyst · Propulsée par Claude Sonnet · Proxy sécurisé côté serveur</div></div>
-      </div>
-      <div class="chat-wrapper">
-        <div class="chat-main">
-          <div class="chat-header">
-            <div class="aria-avatar">⬡</div>
-            <div>
-              <div class="aria-name">ARIA — Advanced Risk Intelligence Analyst</div>
-              <div class="aria-status"><div class="pulse-dot"></div>En ligne · Prête à analyser</div>
-            </div>
-          </div>
-          <div class="chat-messages" id="chat-messages">
-            <div class="msg ai">
-              <div class="msg-bubble">Bonsoir. Je suis <strong>ARIA</strong>, l'analyste IA de Sore Security.<br><br>Je suis connectée à vos données clients et aux flux de threat intelligence en temps réel. Je peux analyser vos risques, décortiquer une alerte SOC, vous guider sur la conformité ISO 27001 ou la Loi 09-08 marocaine, ou vous conseiller sur l'architecture de votre défense.<br><br>Comment puis-je vous assister aujourd'hui ?</div>
-              <div class="msg-time">ARIA · maintenant</div>
-            </div>
-          </div>
-          <div class="chat-quick">
-            <button class="quick-chip" onclick="sendQuick('Analyse les risques critiques de notre infrastructure actuelle')">⚡ Analyse risques</button>
-            <button class="quick-chip" onclick="sendQuick('Comment fonctionne une attaque ransomware et comment s\'en protéger ?')">🛡 Ransomware</button>
-            <button class="quick-chip" onclick="sendQuick('Quelles sont les exigences de la Loi 09-08 marocaine sur la protection des données ?')">📜 Loi 09-08</button>
-            <button class="quick-chip" onclick="sendQuick('J\'ai détecté une connexion suspecte à 3h du matin depuis une IP étrangère, que faire ?')">🚨 Urgence</button>
-            <button class="quick-chip" onclick="sendQuick('Quel pack Sore Security recommandez-vous pour une banque avec 500 employés ?')">💼 Conseil pack</button>
-          </div>
-          <div class="chat-input-area">
-            <textarea class="chat-input" id="chat-input" placeholder="Posez votre question à ARIA..." onkeydown="handleKey(event)"></textarea>
-            <button class="send-btn" id="send-btn" onclick="sendMessage()">►</button>
-          </div>
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- ARIA — bulle flottante, hors nav, hors flux .page/.main : toujours accessible depuis
+     n'importe quel onglet. Contenu interne (#chat-messages, #chat-input, #send-btn, etc.)
+     strictement inchangé — seuls le conteneur (.page → .aria-float-panel) et l'emplacement
+     dans le DOM ont bougé, aucune fonction JS (sendMessage/addMsg/handleKey/sendQuick/
+     showTyping/hideTyping) n'a été touchée. -->
+<div class="aria-bubble" id="aria-bubble" onclick="toggleAriaPanel()" title="ARIA — Assistant IA">
+  <span class="tb-icon">⬡</span>
+</div>
+<div class="aria-float-panel" id="page-ai">
+  <div class="section-header">
+    <div><div class="section-title">ARIA — IA Cybersécurité</div><div class="section-sub">Advanced Risk Intelligence Analyst · Propulsée par Claude Sonnet · Proxy sécurisé côté serveur</div></div>
+    <span class="aria-panel-close" onclick="toggleAriaPanel()" title="Fermer">✕</span>
+  </div>
+  <div class="chat-wrapper">
+    <div class="chat-main">
+      <div class="chat-header">
+        <div class="aria-avatar">⬡</div>
+        <div>
+          <div class="aria-name">ARIA — Advanced Risk Intelligence Analyst</div>
+          <div class="aria-status"><div class="pulse-dot"></div>En ligne · Prête à analyser</div>
         </div>
-        <div class="chat-sidebar">
-          <div class="aria-card">
-            <div class="aria-title">Capacités ARIA</div>
-            <div class="capability"><div class="cap-icon">🔍</div><div class="cap-text">Analyse de menaces et threat intelligence temps réel</div></div>
-            <div class="capability"><div class="cap-icon">📊</div><div class="cap-text">Évaluation de posture de sécurité et score de résilience</div></div>
-            <div class="capability"><div class="cap-icon">📜</div><div class="cap-text">Conformité ISO 27001, RGPD, Loi 09-08 Maroc</div></div>
-            <div class="capability"><div class="cap-icon">🚨</div><div class="cap-text">Triage d'incidents et recommandations CSIRT</div></div>
-            <div class="capability"><div class="cap-icon">🏗</div><div class="cap-text">Conseil architecture réseau et défense en profondeur</div></div>
-            <div class="capability"><div class="cap-icon">💼</div><div class="cap-text">Recommandation de services adaptés à votre contexte</div></div>
-          </div>
-          <div class="aria-card">
-            <div class="aria-title">Sécurité IA</div>
-            <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);line-height:1.7">
-              ✓ Clé API jamais exposée<br>
-              ✓ Proxy sécurisé côté serveur<br>
-              ✓ Historique limité à 10 messages<br>
-              ✓ Inputs validés et sanitisés<br>
-              ✓ Rate limiting : 20 req/min<br>
-              ✓ Audit log de chaque query
-            </div>
-          </div>
+      </div>
+      <div class="chat-messages" id="chat-messages">
+        <div class="msg ai">
+          <div class="msg-bubble">Bonsoir. Je suis <strong>ARIA</strong>, l'analyste IA de Sore Security.<br><br>Je suis connectée à vos données clients et aux flux de threat intelligence en temps réel. Je peux analyser vos risques, décortiquer une alerte SOC, vous guider sur la conformité ISO 27001 ou la Loi 09-08 marocaine, ou vous conseiller sur l'architecture de votre défense.<br><br>Comment puis-je vous assister aujourd'hui ?</div>
+          <div class="msg-time">ARIA · maintenant</div>
+        </div>
+      </div>
+      <div class="chat-quick">
+        <button class="quick-chip" onclick="sendQuick('Analyse les risques critiques de notre infrastructure actuelle')">⚡ Analyse risques</button>
+        <button class="quick-chip" onclick="sendQuick('Comment fonctionne une attaque ransomware et comment s\'en protéger ?')">🛡 Ransomware</button>
+        <button class="quick-chip" onclick="sendQuick('Quelles sont les exigences de la Loi 09-08 marocaine sur la protection des données ?')">📜 Loi 09-08</button>
+        <button class="quick-chip" onclick="sendQuick('J\'ai détecté une connexion suspecte à 3h du matin depuis une IP étrangère, que faire ?')">🚨 Urgence</button>
+        <button class="quick-chip" onclick="sendQuick('Quel pack Sore Security recommandez-vous pour une banque avec 500 employés ?')">💼 Conseil pack</button>
+      </div>
+      <div class="chat-input-area">
+        <textarea class="chat-input" id="chat-input" placeholder="Posez votre question à ARIA..." onkeydown="handleKey(event)"></textarea>
+        <button class="send-btn" id="send-btn" onclick="sendMessage()">►</button>
+      </div>
+    </div>
+    <div class="chat-sidebar">
+      <div class="aria-card">
+        <div class="aria-title">Capacités ARIA</div>
+        <div class="capability"><div class="cap-icon">🔍</div><div class="cap-text">Analyse de menaces et threat intelligence temps réel</div></div>
+        <div class="capability"><div class="cap-icon">📊</div><div class="cap-text">Évaluation de posture de sécurité et score de résilience</div></div>
+        <div class="capability"><div class="cap-icon">📜</div><div class="cap-text">Conformité ISO 27001, RGPD, Loi 09-08 Maroc</div></div>
+        <div class="capability"><div class="cap-icon">🚨</div><div class="cap-text">Triage d'incidents et recommandations CSIRT</div></div>
+        <div class="capability"><div class="cap-icon">🏗</div><div class="cap-text">Conseil architecture réseau et défense en profondeur</div></div>
+        <div class="capability"><div class="cap-icon">💼</div><div class="cap-text">Recommandation de services adaptés à votre contexte</div></div>
+      </div>
+      <div class="aria-card">
+        <div class="aria-title">Sécurité IA</div>
+        <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);line-height:1.7">
+          ✓ Clé API jamais exposée<br>
+          ✓ Proxy sécurisé côté serveur<br>
+          ✓ Historique limité à 10 messages<br>
+          ✓ Inputs validés et sanitisés<br>
+          ✓ Rate limiting : 20 req/min<br>
+          ✓ Audit log de chaque query
         </div>
       </div>
     </div>
-
-  </div><!-- /main -->
-</div><!-- /app -->
+  </div>
+</div>
 
 <div class="toast" id="toast"></div>
 
@@ -1948,13 +2028,31 @@ function showAuthError(id, msg) {
 }
 
 // ════════════════════════════════════════════
-// NAVIGATION
+// NAVIGATION — menus déroulants groupés (SOC/Threat Intel/Gestion/IAM/Business)
 // ════════════════════════════════════════════
+function closeAllTbDropdowns() {
+  document.querySelectorAll('.tb-dropdown.open').forEach(d => d.classList.remove('open'));
+}
+function toggleTbDropdown(event, group) {
+  event.stopPropagation(); // sans ça, le clic remonte jusqu'au listener document ci-dessous et referme le menu qu'on vient d'ouvrir dans le même tick
+  const el = document.querySelector(`.tb-dropdown[data-group="${group}"]`);
+  const wasOpen = el.classList.contains('open');
+  closeAllTbDropdowns(); // un seul menu ouvert à la fois
+  if (!wasOpen) el.classList.add('open');
+}
+document.addEventListener('click', closeAllTbDropdowns); // clic extérieur → fermeture
+
 function nav(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.tb-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tb-btn, .tb-dropdown-item').forEach(b => b.classList.remove('active'));
   document.getElementById('page-' + page)?.classList.add('active');
-  document.querySelector(`[data-page="${page}"]`)?.classList.add('active');
+  const navEl = document.querySelector(`[data-page="${page}"]`);
+  navEl?.classList.add('active');
+  // Le bouton du groupe parent (ex. "SOC ▾") reste visuellement actif quand un de ses
+  // sous-onglets est sélectionné — recherche du .tb-dropdown ancêtre, sans quoi seul
+  // l'item de menu lui-même (invisible une fois le menu refermé) porterait .active.
+  navEl?.closest('.tb-dropdown')?.querySelector('.tb-dropdown-btn')?.classList.add('active');
+  closeAllTbDropdowns();
   if (page === 'soc') loadSOC();
   if (page === 'dashboard') loadDashboard();
   if (page === 'logs') loadLogs();
@@ -6961,6 +7059,13 @@ function startTicker() {
 // ════════════════════════════════════════════
 // AI CHAT — Proxy sécurisé via backend
 // ════════════════════════════════════════════
+/** Bascule le panneau flottant ARIA — pas de fermeture au clic extérieur (délibéré : un chat
+ * qu'on referme accidentellement en cliquant ailleurs pour consulter une autre page serait
+ * une mauvaise expérience ; contrairement aux menus de nav, non demandé explicitement ici). */
+function toggleAriaPanel() {
+  document.getElementById('page-ai').classList.toggle('open');
+}
+
 async function sendMessage() {
   const input = document.getElementById('chat-input');
   const msg = input.value.trim();
