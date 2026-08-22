@@ -790,6 +790,7 @@ select.form-input option{background:var(--surface)}
       <div class="tb-btn" onclick="nav('atlas')" data-page="atlas"><span class="tb-icon">🗺</span><span>ATLAS</span></div>
       <div class="tb-btn" onclick="nav('argus')" data-page="argus"><span class="tb-icon">🎯</span><span>Exposition</span></div>
       <div class="tb-btn" onclick="nav('janus')" data-page="janus"><span class="tb-icon">🔑</span><span>IAM</span></div>
+      <div class="tb-btn" onclick="nav('integrations')" data-page="integrations"><span class="tb-icon">🔌</span><span>Intégrations</span></div>
       <div class="tb-btn" onclick="nav('chronicle')" data-page="chronicle"><span class="tb-icon">📜</span><span>Chronicle</span></div>
       <div class="tb-btn" onclick="nav('reports')" data-page="reports"><span class="tb-icon">▦</span><span>Rapports</span></div>
       <div class="tb-btn" onclick="nav('services')" data-page="services"><span class="tb-icon">◈</span><span>Services</span></div>
@@ -1471,6 +1472,69 @@ select.form-input option{background:var(--surface)}
       </div>
     </div>
 
+    <!-- ══ INTÉGRATIONS — Connecteurs d'annuaire directs (Pôle AEGIS, JANUS Phase 2) ══ -->
+    <div class="page" id="page-integrations">
+      <div class="section-header">
+        <div><div class="section-title">Intégrations</div><div class="section-sub">Connecteurs d'annuaire directs — synchronisation automatique des identités</div></div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <select class="form-input" id="integrations-client-select" style="display:none;min-width:220px" onchange="onIntegrationsClientChange()"></select>
+          <button class="action-btn" onclick="loadIntegrationsPage()">↺ Actualiser</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Azure AD / Entra ID</div>
+
+        <div id="integrations-azuread-readonly-notice" style="display:none;font-family:var(--font-mono);font-size:11px;color:var(--text-dim);padding:8px 0 4px"></div>
+
+        <!-- Formulaire de configuration — admin UNIQUEMENT (backend : requireRole('admin') seul sur
+             POST /api/janus/directory/configure, jamais analyst — secrets client réels). -->
+        <div id="integrations-azuread-form">
+          <div class="form-group"><label class="form-label">Tenant ID Azure</label>
+            <input class="form-input" id="aad-tenant-id" placeholder="ex. 11111111-2222-3333-4444-555555555555" autocomplete="off"/></div>
+          <div class="form-group"><label class="form-label">Client ID (App registration)</label>
+            <input class="form-input" id="aad-client-id" placeholder="ex. 66666666-7777-8888-9999-000000000000" autocomplete="off"/></div>
+          <div class="form-group"><label class="form-label">Client Secret</label>
+            <input class="form-input" type="password" id="aad-client-secret" placeholder="Valeur du secret (jamais réaffichée après envoi)" autocomplete="new-password"/></div>
+          <button class="action-btn primary" id="aad-configure-btn" onclick="integrationsConfigureAzureAD()">Connecter</button>
+        </div>
+
+        <!-- État "Connecté" — remplace le formulaire une fois une connexion configurée (connected OU error). -->
+        <div id="integrations-azuread-connected" style="display:none">
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label-top">Statut</div>
+              <div class="stat-val" id="aad-status-val" style="font-size:18px">—</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label-top">Dernière synchronisation</div>
+              <div class="stat-val" id="aad-last-sync-val" style="font-size:14px">—</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label-top">Prochaine sync estimée</div>
+              <div class="stat-val" id="aad-next-sync-val" style="font-size:14px">—</div>
+            </div>
+          </div>
+          <div id="aad-sync-error-banner" style="display:none;background:var(--red-dim);border:1px solid var(--red);border-radius:4px;padding:12px;margin:16px 0;color:var(--red);font-size:12px;font-family:var(--font-mono);line-height:1.5"></div>
+          <div style="margin-top:16px;display:flex;gap:10px">
+            <button class="action-btn primary" id="aad-sync-btn" onclick="integrationsSyncAzureAD()">🔄 Synchroniser maintenant</button>
+            <button class="action-btn" id="aad-reconfigure-btn" onclick="integrationsShowAzureADForm()">Reconfigurer</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Roadmap — structure visuelle uniquement, aucun formulaire actif (non implémentés côté backend). -->
+      <div class="card" style="margin-top:20px;opacity:.65">
+        <div class="card-title"><span class="dot" style="background:var(--text-dim)"></span>Okta <span class="status-pill draft" style="margin-left:10px">Bientôt disponible</span></div>
+        <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Connecteur direct Okta — synchronisation des identités et des groupes. Roadmap Phase 2.</div>
+      </div>
+
+      <div class="card" style="margin-top:20px;opacity:.65">
+        <div class="card-title"><span class="dot" style="background:var(--text-dim)"></span>Active Directory <span class="status-pill draft" style="margin-left:10px">Bientôt disponible</span></div>
+        <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Connecteur direct AD/LDAP — nécessite un agent réseau côté client (contrairement à Azure AD, purement cloud). Roadmap Phase 2.</div>
+      </div>
+    </div>
+
     <!-- ══ CHRONICLE ══ -->
     <div class="page" id="page-chronicle">
       <div class="section-header">
@@ -1901,6 +1965,7 @@ function nav(page) {
   if (page === 'atlas') { loadThreatActors(); loadCampaigns(); loadStrategicReports(); }
   if (page === 'argus') loadArgusPage();
   if (page === 'janus') loadJanusPage();
+  if (page === 'integrations') loadIntegrationsPage();
   if (page === 'chronicle') loadChronicle();
   if (page === 'augur') loadAugur();
   if (page === 'threatintel') loadThreatIntel();
@@ -6063,6 +6128,212 @@ async function janusCloseReview(reviewId) {
   showToast('✅ Revue clôturée');
   await loadJanusReviews(); // await : sans ça, le bouton "Clôturer"/textarea de cette ligne peut encore être présent un instant après le clic (constaté en vérification jsdom)
   loadJanusFindings();
+}
+
+// ════════════════════════════════════════════
+// INTÉGRATIONS — Connecteurs d'annuaire directs (JANUS Phase 2)
+// ════════════════════════════════════════════
+// Réutilise janusClientsCache/janusSelectedClientId/janusClientParam()/janusCanManage()/janusFetch
+// tels quels (pas de duplication de la logique fetch/sélecteur client déjà en place depuis b1dc626)
+// — sélectionner un client ici met à jour la MÊME variable que l'onglet IAM, donc les deux
+// onglets restent cohérents entre eux (une seule source de vérité pour "quel client est
+// sélectionné", pas deux sélecteurs qui pourraient diverger).
+let integrationsAzureADStatus = null; // dernière réponse GET /api/janus/directory/status
+
+async function loadIntegrationsPage() {
+  const selectEl = document.getElementById('integrations-client-select');
+  if (janusCanManage()) {
+    if (!janusClientsCache.length) {
+      const res = await apiCall('/clients?limit=100');
+      janusClientsCache = res?.data || [];
+    }
+    selectEl.style.display = '';
+    selectEl.innerHTML = `<option value="">— Sélectionner un client —</option>${janusClientsCache.map(c => `<option value="${c.id}" ${c.id === janusSelectedClientId ? 'selected' : ''}>${escHtml(c.name)}</option>`).join('')}`;
+    if (!janusSelectedClientId) {
+      integrationsAzureADStatus = null;
+      renderIntegrationsAzureAD();
+      return;
+    }
+  } else {
+    selectEl.style.display = 'none';
+  }
+  // await : une seule chose à charger sur cette page (contrairement à loadJanusPage, qui lance
+  // 3 widgets indépendants en parallèle) — pas de bénéfice à ne pas attendre, et ça évite le
+  // même piège de timing déjà rencontré/corrigé sur janusStartReview/janusCloseReview (commit
+  // 73033cf) : un appelant qui enchaînerait sur `await loadIntegrationsPage()` doit pouvoir
+  // compter sur le fait que le statut est réellement chargé une fois la promesse résolue.
+  await loadIntegrationsAzureADStatus();
+}
+
+async function onIntegrationsClientChange() {
+  janusSelectedClientId = document.getElementById('integrations-client-select').value;
+  await loadIntegrationsPage();
+}
+
+async function loadIntegrationsAzureADStatus() {
+  const qs = janusClientParam();
+  const res = await janusFetch(`/janus/directory/status${qs ? '?' + qs : ''}`, {}, 15000);
+  integrationsAzureADStatus = res.ok ? (res.data?.data || null) : null;
+  renderIntegrationsAzureAD();
+}
+
+/**
+ * Rendu de la card Azure AD selon 3 axes : (a) une connexion existe-t-elle déjà pour ce tenant,
+ * (b) le rôle courant (admin voit tout, analyst lecture + sync, client lecture seule — voir
+ * justification dans le message qui accompagne ce commit), (c) si aucun client n'est
+ * sélectionné (admin/analyst) le formulaire ne doit pas s'afficher du tout (on ne sait pas
+ * encore à quel tenant l'associer).
+ */
+function renderIntegrationsAzureAD() {
+  const formEl = document.getElementById('integrations-azuread-form');
+  const connectedEl = document.getElementById('integrations-azuread-connected');
+  const readonlyNotice = document.getElementById('integrations-azuread-readonly-notice');
+  const isAdmin = currentUser?.role === 'admin';
+  const status = integrationsAzureADStatus;
+
+  if (janusCanManage() && !janusSelectedClientId) {
+    formEl.style.display = 'none';
+    connectedEl.style.display = 'none';
+    readonlyNotice.style.display = '';
+    readonlyNotice.textContent = 'Sélectionnez un client ci-dessus pour voir/configurer son connecteur Azure AD.';
+    return;
+  }
+
+  if (!status || status.status === 'not_configured') {
+    connectedEl.style.display = 'none';
+    if (isAdmin) {
+      formEl.style.display = '';
+      readonlyNotice.style.display = 'none';
+    } else {
+      formEl.style.display = 'none';
+      readonlyNotice.style.display = '';
+      readonlyNotice.textContent = 'Aucun connecteur Azure AD configuré pour ce client — seul un administrateur peut en configurer un.';
+    }
+    return;
+  }
+
+  // Une connexion existe (status='connected' ou 'error') — remplace le formulaire par l'état "Connecté".
+  formEl.style.display = 'none';
+  readonlyNotice.style.display = 'none';
+  connectedEl.style.display = '';
+
+  const statusEl = document.getElementById('aad-status-val');
+  statusEl.textContent = status.status;
+  statusEl.style.color = status.status === 'connected' ? 'var(--green)' : 'var(--red)';
+
+  document.getElementById('aad-last-sync-val').textContent = status.last_sync_at
+    ? new Date(status.last_sync_at).toLocaleString('fr-FR') : 'Jamais';
+
+  const nextSyncEl = document.getElementById('aad-next-sync-val');
+  nextSyncEl.textContent = (status.last_sync_at && status.sync_frequency_hours)
+    ? new Date(new Date(status.last_sync_at).getTime() + status.sync_frequency_hours * 3600000).toLocaleString('fr-FR')
+    : 'Dès la prochaine vérification (cron horaire)';
+
+  const errorBanner = document.getElementById('aad-sync-error-banner');
+  if (status.last_sync_status === 'error' && status.last_sync_error) {
+    errorBanner.style.display = '';
+    errorBanner.textContent = '⚠ Dernière synchronisation échouée : ' + status.last_sync_error;
+  } else {
+    errorBanner.style.display = 'none';
+  }
+
+  // Sync : admin ET analyst (même palier RBAC que POST /api/janus/scan côté backend — action
+  // opérationnelle, pas une manipulation de secret). Reconfigurer : admin UNIQUEMENT (ressaisie
+  // d'un client_secret réel). Rôle client : aucun des deux boutons — lecture seule du statut,
+  // cohérent avec le fait que POST /api/janus/directory/sync est réservé admin/analyst côté
+  // backend (client y recevrait un 403) et que la configuration est un acte opérationnel interne
+  // Sore Security, pas une action que le client final déclenche lui-même.
+  document.getElementById('aad-sync-btn').style.display = janusCanManage() ? '' : 'none';
+  document.getElementById('aad-reconfigure-btn').style.display = isAdmin ? '' : 'none';
+}
+
+function integrationsShowAzureADForm() {
+  document.getElementById('integrations-azuread-form').style.display = '';
+  document.getElementById('integrations-azuread-connected').style.display = 'none';
+  document.getElementById('aad-tenant-id').value = '';
+  document.getElementById('aad-client-id').value = '';
+  document.getElementById('aad-client-secret').value = '';
+}
+
+async function integrationsConfigureAzureAD() {
+  if (!janusSelectedClientId) { showToast('⚠ Sélectionnez un client'); return; }
+
+  const azureTenantId = document.getElementById('aad-tenant-id').value.trim();
+  const azureClientId = document.getElementById('aad-client-id').value.trim();
+  const azureClientSecret = document.getElementById('aad-client-secret').value; // jamais .trim() sur un secret
+  if (!azureTenantId || !azureClientId || !azureClientSecret) {
+    showToast('⚠ Tenant ID, Client ID et Client Secret sont tous requis');
+    return;
+  }
+
+  // SÉCURITÉ — le champ secret est vidé du DOM IMMÉDIATEMENT après lecture, AVANT même l'appel
+  // réseau : si celui-ci échoue (timeout, erreur réseau) et que renderIntegrationsAzureAD()
+  // re-rend la card ensuite, il n'y a plus rien à réafficher accidentellement depuis le DOM. La
+  // valeur elle-même ne vit que dans `azureClientSecret`, une const locale à cette fonction :
+  // jamais assignée à une variable de plus large portée (module-level), donc rien à effacer
+  // explicitement côté JS au-delà de la portée naturelle de la fonction — une fois `await
+  // janusFetch(...)` résolu et la fonction terminée, plus aucune référence n'existe en mémoire JS
+  // accessible ailleurs dans l'app.
+  document.getElementById('aad-client-secret').value = '';
+
+  const btn = document.getElementById('aad-configure-btn');
+  btn.disabled = true;
+  const originalLabel = btn.textContent;
+  btn.textContent = '⏳ Connexion...';
+
+  const res = await janusFetch('/janus/directory/configure', {
+    method: 'POST',
+    body: JSON.stringify({
+      clientId: janusSelectedClientId,
+      provider: 'azure_ad',
+      credentials: { azureTenantId, clientId: azureClientId, clientSecret: azureClientSecret },
+    }),
+  }, 30000);
+
+  btn.disabled = false;
+  btn.textContent = originalLabel;
+  // Formulaire vidé dans TOUS les cas (succès ou échec), pas seulement le secret — en cas
+  // d'échec on préfère forcer une ressaisie complète plutôt que de laisser un tenant/client ID
+  // string qui masquerait potentiellement lequel des 3 champs posait problème.
+  document.getElementById('aad-tenant-id').value = '';
+  document.getElementById('aad-client-id').value = '';
+
+  if (!res.ok) {
+    showToast('❌ ' + (res.data?.error || `Échec de connexion (HTTP ${res.status})`));
+    return;
+  }
+
+  const connection = res.data?.data;
+  showToast(connection?.status === 'connected'
+    ? '✅ Connecté à Azure AD'
+    : '⚠ Configuration enregistrée mais le test de connexion a échoué — voir le détail ci-dessous');
+  integrationsAzureADStatus = connection;
+  renderIntegrationsAzureAD();
+}
+
+async function integrationsSyncAzureAD() {
+  if (!janusSelectedClientId && currentUser?.role === 'client') {
+    // pas de sélecteur pour le rôle client (tenant dérivé du JWT) — rien à vérifier ici
+  } else if (!janusSelectedClientId) {
+    showToast('⚠ Sélectionnez un client'); return;
+  }
+
+  const btn = document.getElementById('aad-sync-btn');
+  btn.disabled = true;
+  const originalLabel = btn.textContent;
+  btn.textContent = '⏳ Synchronisation...';
+
+  const body = {};
+  if (janusSelectedClientId) body.clientId = janusSelectedClientId;
+  const res = await janusFetch('/janus/directory/sync', { method: 'POST', body: JSON.stringify(body) }, 60000);
+
+  btn.disabled = false;
+  btn.textContent = originalLabel;
+
+  if (!res.ok) { showToast('❌ ' + (res.data?.error || `Échec (HTTP ${res.status})`)); return; }
+  const summary = res.data?.data;
+  showToast(`✅ Sync terminée — ${summary?.upserted ?? 0} identité(s), ${summary?.adminCount ?? 0} admin(s)`);
+  await loadIntegrationsAzureADStatus();
 }
 
 // ════════════════════════════════════════════
