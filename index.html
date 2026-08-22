@@ -401,6 +401,12 @@ table.data-table tr:hover td{background:rgba(0,180,220,.03)}
 .status-pill.remediated{background:var(--green-dim);color:var(--green);border:1px solid rgba(0,255,136,.25)}
 .status-pill.false_positive{background:rgba(120,130,140,.12);color:var(--text-dim);border:1px solid rgba(120,130,140,.25)}
 .status-pill.stale,.status-pill.removed{background:rgba(120,130,140,.12);color:var(--text-dim);border:1px solid rgba(120,130,140,.25)}
+/* ── JANUS — finding/identity/review status (open/resolved/false_positive/active déjà définis ci-dessus, réutilisés tels quels) ── */
+.status-pill.reviewed{background:var(--cyan-dim);color:var(--cyan);border:1px solid rgba(0,180,220,.25)}
+.status-pill.in_progress{background:var(--cyan-dim);color:var(--cyan);border:1px solid rgba(0,180,220,.25)}
+.status-pill.dormant{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(255,170,0,.25)}
+.status-pill.orphaned{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,45,85,.25)}
+.status-pill.disabled{background:rgba(120,130,140,.12);color:var(--text-dim);border:1px solid rgba(120,130,140,.25)}
 
 /* ── SOC correlation badge (ARGUS) — l'info la plus critique du module, mise en évidence forte ── */
 .soc-corr-badge{
@@ -783,6 +789,7 @@ select.form-input option{background:var(--surface)}
       <div class="tb-btn" onclick="nav('automation')" data-page="automation"><span class="tb-icon">⚡</span><span>Automation</span></div>
       <div class="tb-btn" onclick="nav('atlas')" data-page="atlas"><span class="tb-icon">🗺</span><span>ATLAS</span></div>
       <div class="tb-btn" onclick="nav('argus')" data-page="argus"><span class="tb-icon">🎯</span><span>Exposition</span></div>
+      <div class="tb-btn" onclick="nav('janus')" data-page="janus"><span class="tb-icon">🔑</span><span>IAM</span></div>
       <div class="tb-btn" onclick="nav('chronicle')" data-page="chronicle"><span class="tb-icon">📜</span><span>Chronicle</span></div>
       <div class="tb-btn" onclick="nav('reports')" data-page="reports"><span class="tb-icon">▦</span><span>Rapports</span></div>
       <div class="tb-btn" onclick="nav('services')" data-page="services"><span class="tb-icon">◈</span><span>Services</span></div>
@@ -1389,6 +1396,100 @@ select.form-input option{background:var(--surface)}
       </div>
     </div>
 
+    <!-- ══ JANUS — IAM (Pôle AEGIS) ══ -->
+    <div class="page" id="page-janus">
+      <div class="section-header">
+        <div><div class="section-title">JANUS — Identity &amp; Access Management</div><div class="section-sub">Comptes dormants/orphelins, privilèges excessifs, revues d'accès — Pôle AEGIS</div></div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <select class="form-input" id="janus-client-select" style="display:none;min-width:220px" onchange="onJanusClientChange()"></select>
+          <button class="action-btn" onclick="loadJanusPage()">↺ Actualiser</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="dot" style="background:var(--green)"></span>Conformité IAM</div>
+        <div style="display:flex;align-items:center;gap:28px;flex-wrap:wrap">
+          <div style="width:120px;height:120px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+                      background:conic-gradient(var(--line2) 0deg 360deg)" id="janus-gauge">
+            <div style="width:92px;height:92px;border-radius:50%;background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center">
+              <div id="janus-score" style="font-family:var(--font-display);font-size:26px;font-weight:700;color:var(--text-dim)">—</div>
+              <div style="font-size:9px;color:var(--text-dim);letter-spacing:.06em">/ 100</div>
+            </div>
+          </div>
+          <div style="flex:1;min-width:200px">
+            <div id="janus-level" style="font-size:14px;font-weight:700;color:var(--text-dim);margin-bottom:6px">Aucune donnée</div>
+            <div id="janus-detail" style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-bottom:16px">Sélectionnez un client et lancez un scan.</div>
+            <button class="action-btn primary" id="janus-scan-btn" onclick="janusRunScan()">🔍 Lancer un scan</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px">
+        <div class="section-header" style="margin-bottom:14px">
+          <div class="card-title" style="margin:0"><span class="dot" style="background:var(--cyan)"></span>Findings IAM</div>
+          <div style="display:flex;gap:10px">
+            <select class="form-input" id="janus-f-status" onchange="loadJanusFindings()" style="width:auto">
+              <option value="">Tous statuts</option>
+              <option value="open">Open</option><option value="reviewed">Reviewed</option>
+              <option value="resolved">Resolved</option><option value="false_positive">False positive</option>
+            </select>
+            <select class="form-input" id="janus-f-severity" onchange="loadJanusFindings()" style="width:auto">
+              <option value="">Toutes sévérités</option>
+              <option value="critical">Critical</option><option value="high">High</option>
+              <option value="medium">Medium</option><option value="low">Low</option>
+            </select>
+            <select class="form-input" id="janus-f-type" onchange="loadJanusFindings()" style="width:auto">
+              <option value="">Tous types</option>
+              <option value="orphaned_account">Compte orphelin</option>
+              <option value="dormant_account">Compte dormant</option>
+              <option value="excessive_privilege">Privilège excessif</option>
+              <option value="anomalous_access">Accès anormal</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrap"><table class="data-table" id="janus-findings-table">
+          <thead><tr><th>Type</th><th>Sévérité</th><th>Identité</th><th>Statut</th><th>Détecté le</th><th></th></tr></thead>
+          <tbody id="janus-findings-tbody"><tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+        </table></div>
+      </div>
+
+      <!-- Pas de route GET de liste pour iam_access_reviews côté backend (vérifié
+           dans src/index.js/src/agents/janus.js : seules POST /api/janus/access-review
+           et PATCH /api/janus/access-review/:id/close existent) — cette carte
+           n'affiche donc que la revue la plus récente créée DANS CETTE SESSION
+           frontend (état JS `janusCurrentReview`), pas un historique persisté.
+           LIMITATION signalée explicitement, pas une hypothèse silencieuse. -->
+      <div class="card" style="margin-top:20px">
+        <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Revue d'accès</div>
+        <div id="janus-review-empty" style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);padding:8px 0">
+          Aucune revue en cours dans cette session — l'API ne fournit pas d'historique des revues passées, seule la plus récente lancée ici est affichée.
+        </div>
+        <div id="janus-review-active" style="display:none">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+            <div>
+              <div style="font-size:13px;color:var(--text-bright);font-weight:600">Périmètre : <span id="janus-review-scope">—</span></div>
+              <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-top:4px"><span id="janus-review-findings-count">0</span> finding(s) dans le périmètre · <span class="status-pill" id="janus-review-status-pill">in_progress</span></div>
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:14px">
+            <label class="form-label">Résumé de clôture (optionnel)</label>
+            <textarea class="form-input" id="janus-review-summary" rows="2" placeholder="Laisser vide pour génération automatique"></textarea>
+          </div>
+          <button class="action-btn primary" id="janus-review-close-btn" onclick="janusCloseReview()">Clôturer la revue</button>
+        </div>
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center" id="janus-review-launch-row">
+          <select class="form-input" id="janus-review-scope-select" style="width:auto">
+            <option value="full">Périmètre complet</option>
+            <option value="orphaned_account">Comptes orphelins</option>
+            <option value="dormant_account">Comptes dormants</option>
+            <option value="excessive_privilege">Privilèges excessifs</option>
+            <option value="anomalous_access">Accès anormal</option>
+          </select>
+          <button class="action-btn" onclick="janusStartReview()">▶ Lancer une revue</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ══ CHRONICLE ══ -->
     <div class="page" id="page-chronicle">
       <div class="section-header">
@@ -1818,6 +1919,7 @@ function nav(page) {
   if (page === 'automation') { loadWorkflows(); loadExecutions(); }
   if (page === 'atlas') { loadThreatActors(); loadCampaigns(); loadStrategicReports(); }
   if (page === 'argus') loadArgusPage();
+  if (page === 'janus') loadJanusPage();
   if (page === 'chronicle') loadChronicle();
   if (page === 'augur') loadAugur();
   if (page === 'threatintel') loadThreatIntel();
@@ -5664,6 +5766,277 @@ function displayOracleResult(data) {
   `;
 
   document.body.appendChild(modal);
+}
+
+// ════════════════════════════════════════════
+// JANUS — Identity & Access Management (Pôle AEGIS)
+// ════════════════════════════════════════════
+let janusClientsCache = [];
+let janusSelectedClientId = '';
+let janusFindingsList = [];
+let janusCurrentReview = null; // { review, findings } — pas d'historique persisté, voir note HTML
+
+// `GET /api/janus/*` exige un tenant résolu côté serveur (resolveTenantScope),
+// même logique exacte que ARGUS (argusClientParam) : automatique pour le rôle
+// 'client' (son propre tenant), admin/analyst doivent fournir ?clientId=
+// explicitement (sinon liste vide par design côté backend).
+function janusClientParam() {
+  if (currentUser?.role === 'client') return '';
+  return janusSelectedClientId ? `clientId=${janusSelectedClientId}` : '';
+}
+function janusCanManage() { return ['admin', 'analyst'].includes(currentUser?.role); }
+
+/**
+ * Fetch dédié JANUS — même contrat que argusScanFetch ({ ok, status, data }),
+ * nécessaire ici pour la même raison : apiCall() avale le status code et le
+ * corps de la réponse en cas d'échec (`return res.ok ? res.json() : null`),
+ * alors que POST /api/janus/scan et POST /api/janus/access-review renvoient
+ * des messages d'erreur explicites (ex. "clientId requis") qu'il faut pouvoir
+ * afficher. `data` reste le corps JSON BRUT renvoyé par le backend (donc
+ * `{ data: ... }` ou `{ error: ... }`) — un appelant doit lire `res.data?.data`
+ * pour la charge utile ou `res.data?.error` pour un message d'erreur, jamais
+ * `res.data` directement (c'est ce double niveau, déjà correct dans le flux
+ * ARGUS existant, qu'il ne faut pas aplatir par erreur).
+ * PAS de retry-on-timeout (contrairement à argusScanFetch) : cette logique
+ * existait spécifiquement pour absorber un cold start Render lors d'un scan
+ * réseau réel de plusieurs minutes vers l'infrastructure d'un client — les
+ * routes JANUS (DB + un seul appel Groq côté serveur) n'ont pas ce profil de
+ * latence, un timeout simple suffit.
+ */
+async function janusFetch(path, options = {}, timeoutMs = 30000) {
+  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+  try {
+    const res = await fetch(`${API}${path}`, { ...options, headers, signal: AbortSignal.timeout(timeoutMs) });
+    let data = null;
+    try { data = await res.json(); } catch { /* réponse sans corps JSON exploitable */ }
+    return { ok: res.ok, status: res.status, data };
+  } catch (e) {
+    return { ok: false, status: 0, data: null, networkError: true, timedOut: e.name === 'TimeoutError' };
+  }
+}
+
+const JANUS_FINDING_TYPE_LABELS = {
+  orphaned_account: 'Compte orphelin',
+  dormant_account: 'Compte dormant',
+  excessive_privilege: 'Privilège excessif',
+  anomalous_access: 'Accès anormal',
+};
+
+async function loadJanusPage() {
+  const selectEl = document.getElementById('janus-client-select');
+  const scanBtn = document.getElementById('janus-scan-btn');
+  const launchRow = document.getElementById('janus-review-launch-row');
+  if (janusCanManage()) {
+    if (!janusClientsCache.length) {
+      const res = await apiCall('/clients?limit=100');
+      janusClientsCache = res?.data || [];
+    }
+    selectEl.style.display = '';
+    scanBtn.style.display = '';
+    launchRow.style.display = '';
+    selectEl.innerHTML = `<option value="">— Sélectionner un client —</option>${janusClientsCache.map(c => `<option value="${c.id}" ${c.id === janusSelectedClientId ? 'selected' : ''}>${escHtml(c.name)}</option>`).join('')}`;
+    if (!janusSelectedClientId) {
+      document.getElementById('janus-findings-tbody').innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Sélectionnez un client ci-dessus</td></tr>`;
+      resetJanusScore();
+      return;
+    }
+  } else {
+    // Rôle 'client' : GET routes accessibles (tenant dérivé du JWT), mais les
+    // 3 actions d'écriture (scan, lancer/clôturer une revue) sont réservées
+    // admin/analyst côté backend (requireRole) — masquées ici en conséquence.
+    selectEl.style.display = 'none';
+    scanBtn.style.display = 'none';
+    launchRow.style.display = 'none';
+  }
+  loadJanusScore();
+  loadJanusFindings();
+  renderJanusReviewCard();
+}
+
+function onJanusClientChange() {
+  janusSelectedClientId = document.getElementById('janus-client-select').value;
+  janusCurrentReview = null; // la revue affichée était scopée à l'ancien client
+  loadJanusPage();
+}
+
+function resetJanusScore() {
+  document.getElementById('janus-score').textContent = '—';
+  document.getElementById('janus-score').style.color = 'var(--text-dim)';
+  document.getElementById('janus-level').textContent = 'Aucune donnée';
+  document.getElementById('janus-level').style.color = 'var(--text-dim)';
+  document.getElementById('janus-detail').textContent = 'Sélectionnez un client et lancez un scan.';
+  document.getElementById('janus-gauge').style.background = 'conic-gradient(var(--line2) 0deg 360deg)';
+}
+
+async function loadJanusScore() {
+  const qs = janusClientParam();
+  const res = await apiCall(`/janus/compliance-score${qs ? '?' + qs : ''}`);
+  const scoreEl = document.getElementById('janus-score');
+  if (!scoreEl) return;
+  const gaugeEl = document.getElementById('janus-gauge');
+  const levelEl = document.getElementById('janus-level');
+  const detailEl = document.getElementById('janus-detail');
+
+  const score = res?.data?.score;
+  const breakdown = res?.data?.breakdown;
+  if (!res?.data || score === null || score === undefined) {
+    scoreEl.textContent = '—';
+    scoreEl.style.color = 'var(--text-dim)';
+    levelEl.textContent = 'Aucune identité';
+    levelEl.style.color = 'var(--text-dim)';
+    detailEl.textContent = breakdown?.message || 'Aucune identité enregistrée pour ce tenant — lancez un scan une fois des identités connues.';
+    gaugeEl.style.background = 'conic-gradient(var(--line2) 0deg 360deg)';
+    return;
+  }
+
+  const level = score >= 90 ? 'Exemplaire' : score >= 70 ? 'Conforme' : score >= 50 ? 'Partiel' : 'Non conforme';
+  const color = score >= 70 ? 'var(--green)' : score >= 50 ? 'var(--amber)' : 'var(--red)';
+  scoreEl.textContent = score;
+  scoreEl.style.color = color;
+  levelEl.textContent = level;
+  levelEl.style.color = color;
+  detailEl.textContent = `${breakdown.totalIdentities} identité(s) · ${breakdown.openCriticalHighFindings} finding(s) critique(s)/high ouvert(s)`;
+  gaugeEl.style.background = `conic-gradient(${color} ${score * 3.6}deg, var(--line2) ${score * 3.6}deg 360deg)`;
+}
+
+async function janusRunScan() {
+  if (janusCanManage() && !janusSelectedClientId) { showToast('⚠ Sélectionnez un client'); return; }
+  showToast('⏳ Scan JANUS en cours...');
+  const res = await janusFetch('/janus/scan', { method: 'POST', body: JSON.stringify({ clientId: janusSelectedClientId }) }, 60000);
+  if (!res.ok) { showToast('❌ ' + (res.data?.error || `Échec du scan (HTTP ${res.status})`)); return; }
+  const count = res.data?.data?.newFindings?.length || 0;
+  showToast(count ? `✅ Scan terminé — ${count} nouveau(x) finding(s)` : '✅ Scan terminé — aucun nouveau finding');
+  loadJanusScore();
+  loadJanusFindings();
+}
+
+function janusFindingsQueryParams() {
+  const qs = new URLSearchParams();
+  if (janusSelectedClientId) qs.set('clientId', janusSelectedClientId);
+  const status = document.getElementById('janus-f-status')?.value;
+  const severity = document.getElementById('janus-f-severity')?.value;
+  const type = document.getElementById('janus-f-type')?.value;
+  if (status) qs.set('status', status);
+  if (severity) qs.set('severity', severity);
+  if (type) qs.set('type', type);
+  return qs.toString();
+}
+
+async function loadJanusFindings() {
+  const qs = janusFindingsQueryParams();
+  const res = await apiCall(`/janus/findings${qs ? '?' + qs : ''}`);
+  const tbody = document.getElementById('janus-findings-tbody');
+  if (!res) {
+    janusFindingsList = [];
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune donnée — accès insuffisant ou erreur réseau</td></tr>`;
+    return;
+  }
+  janusFindingsList = res.data || [];
+  renderJanusFindingsTable();
+}
+
+// `evidence.username` (pas de jointure iam_identities dans la réponse GET
+// /api/janus/findings — vérifié dans src/agents/janus.js#listFindings, qui ne
+// SELECTionne que iam_findings) : le username est néanmoins fiable car
+// detectOrphanedAccounts/detectExcessivePrivileges l'écrivent systématiquement
+// dans evidence au moment de la détection (vérifié dans le code backend) —
+// repli sur identity_id brut si absent (finding d'une future source qui ne le
+// fournirait pas).
+function renderJanusFindingsTable() {
+  const tbody = document.getElementById('janus-findings-tbody');
+  if (!janusFindingsList.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun finding — lancez un scan</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  janusFindingsList.forEach(f => {
+    const tr = document.createElement('tr');
+    const identityLabel = f.evidence?.username
+      ? escHtml(f.evidence.username)
+      : `<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">${escHtml(f.identity_id || '—')}</span>`;
+    let actions = '—';
+    if (janusCanManage() && f.status === 'open') {
+      actions = `<select class="form-input" style="width:auto;padding:4px 8px;font-size:11px" onchange="janusUpdateFindingStatus('${f.id}', this.value)">
+        <option value="">Changer statut…</option>
+        <option value="reviewed">Reviewed</option>
+        <option value="resolved">Resolved</option>
+        <option value="false_positive">False positive</option>
+      </select>`;
+    }
+    tr.innerHTML = `
+      <td>${JANUS_FINDING_TYPE_LABELS[f.finding_type] || escHtml(f.finding_type)}</td>
+      <td><span class="sev-badge ${f.severity}">${(f.severity || '').toUpperCase()}</span></td>
+      <td>${identityLabel}</td>
+      <td><span class="status-pill ${f.status}">${f.status}</span></td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${new Date(f.created_at).toLocaleDateString('fr-FR')}</td>
+      <td>${actions}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function janusUpdateFindingStatus(findingId, status) {
+  if (!status) return;
+  const res = await janusFetch(`/janus/findings/${findingId}`, { method: 'PATCH', body: JSON.stringify({ status }) }, 30000);
+  if (!res.ok) { showToast('❌ ' + (res.data?.error || `Échec (HTTP ${res.status})`)); loadJanusFindings(); return; }
+  showToast('✅ Statut mis à jour');
+  loadJanusFindings();
+  loadJanusScore();
+}
+
+function renderJanusReviewCard() {
+  const emptyEl = document.getElementById('janus-review-empty');
+  const activeEl = document.getElementById('janus-review-active');
+  if (!janusCurrentReview) {
+    emptyEl.style.display = '';
+    activeEl.style.display = 'none';
+    return;
+  }
+  emptyEl.style.display = 'none';
+  activeEl.style.display = '';
+  const { review, findings } = janusCurrentReview;
+  document.getElementById('janus-review-scope').textContent = review.scope;
+  document.getElementById('janus-review-findings-count').textContent = (findings || []).length;
+  const pill = document.getElementById('janus-review-status-pill');
+  pill.textContent = review.status;
+  pill.className = 'status-pill ' + review.status;
+  const summaryInput = document.getElementById('janus-review-summary');
+  const closeBtn = document.getElementById('janus-review-close-btn');
+  if (review.status === 'closed') {
+    summaryInput.value = review.summary || '';
+    summaryInput.disabled = true;
+    closeBtn.style.display = 'none';
+  } else {
+    summaryInput.disabled = false;
+    closeBtn.style.display = janusCanManage() ? '' : 'none';
+  }
+}
+
+async function janusStartReview() {
+  if (!janusSelectedClientId && currentUser?.role !== 'client') { showToast('⚠ Sélectionnez un client'); return; }
+  const scope = document.getElementById('janus-review-scope-select').value;
+  const body = { scope };
+  if (janusSelectedClientId) body.clientId = janusSelectedClientId;
+  showToast('⏳ Lancement de la revue d\'accès...');
+  const res = await janusFetch('/janus/access-review', { method: 'POST', body: JSON.stringify(body) }, 60000);
+  if (!res.ok) { showToast('❌ ' + (res.data?.error || `Échec (HTTP ${res.status})`)); return; }
+  janusCurrentReview = res.data?.data;
+  renderJanusReviewCard();
+  showToast('✅ Revue lancée');
+}
+
+async function janusCloseReview() {
+  if (!janusCurrentReview?.review?.id) return;
+  const summary = document.getElementById('janus-review-summary').value.trim();
+  showToast(summary ? '⏳ Clôture en cours...' : '⏳ Clôture en cours — génération automatique du résumé...');
+  const res = await janusFetch(`/janus/access-review/${janusCurrentReview.review.id}/close`, {
+    method: 'PATCH', body: JSON.stringify(summary ? { summary } : {}),
+  }, 60000);
+  if (!res.ok) { showToast('❌ ' + (res.data?.error || `Échec (HTTP ${res.status})`)); return; }
+  janusCurrentReview.review = res.data?.data;
+  renderJanusReviewCard();
+  showToast('✅ Revue clôturée');
+  loadJanusFindings();
 }
 
 // ════════════════════════════════════════════
