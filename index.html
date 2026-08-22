@@ -1453,29 +1453,10 @@ select.form-input option{background:var(--surface)}
         </table></div>
       </div>
 
-      <!-- Pas de route GET de liste pour iam_access_reviews côté backend (vérifié
-           dans src/index.js/src/agents/janus.js : seules POST /api/janus/access-review
-           et PATCH /api/janus/access-review/:id/close existent) — cette carte
-           n'affiche donc que la revue la plus récente créée DANS CETTE SESSION
-           frontend (état JS `janusCurrentReview`), pas un historique persisté.
-           LIMITATION signalée explicitement, pas une hypothèse silencieuse. -->
       <div class="card" style="margin-top:20px">
         <div class="card-title"><span class="dot" style="background:var(--cyan)"></span>Revue d'accès</div>
-        <div id="janus-review-empty" style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);padding:8px 0">
-          Aucune revue en cours dans cette session — l'API ne fournit pas d'historique des revues passées, seule la plus récente lancée ici est affichée.
-        </div>
-        <div id="janus-review-active" style="display:none">
-          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-            <div>
-              <div style="font-size:13px;color:var(--text-bright);font-weight:600">Périmètre : <span id="janus-review-scope">—</span></div>
-              <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-top:4px"><span id="janus-review-findings-count">0</span> finding(s) dans le périmètre · <span class="status-pill" id="janus-review-status-pill">in_progress</span></div>
-            </div>
-          </div>
-          <div class="form-group" style="margin-top:14px">
-            <label class="form-label">Résumé de clôture (optionnel)</label>
-            <textarea class="form-input" id="janus-review-summary" rows="2" placeholder="Laisser vide pour génération automatique"></textarea>
-          </div>
-          <button class="action-btn primary" id="janus-review-close-btn" onclick="janusCloseReview()">Clôturer la revue</button>
+        <div id="janus-reviews-list" style="max-height:420px;overflow-y:auto;padding-right:4px">
+          <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);padding:8px 0">Chargement...</div>
         </div>
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center" id="janus-review-launch-row">
           <select class="form-input" id="janus-review-scope-select" style="width:auto">
@@ -5774,7 +5755,8 @@ function displayOracleResult(data) {
 let janusClientsCache = [];
 let janusSelectedClientId = '';
 let janusFindingsList = [];
-let janusCurrentReview = null; // { review, findings } — pas d'historique persisté, voir note HTML
+let janusReviewsList = []; // GET /api/janus/access-reviews?limit=20 — historique réel, persisté côté backend
+let janusExpandedSummaries = new Set(); // ids de revues dont le résumé est affiché en entier (état d'affichage uniquement)
 
 // `GET /api/janus/*` exige un tenant résolu côté serveur (resolveTenantScope),
 // même logique exacte que ARGUS (argusClientParam) : automatique pour le rôle
@@ -5851,12 +5833,11 @@ async function loadJanusPage() {
   }
   loadJanusScore();
   loadJanusFindings();
-  renderJanusReviewCard();
+  loadJanusReviews();
 }
 
 function onJanusClientChange() {
   janusSelectedClientId = document.getElementById('janus-client-select').value;
-  janusCurrentReview = null; // la revue affichée était scopée à l'ancien client
   loadJanusPage();
 }
 
@@ -5984,32 +5965,79 @@ async function janusUpdateFindingStatus(findingId, status) {
   loadJanusScore();
 }
 
-function renderJanusReviewCard() {
-  const emptyEl = document.getElementById('janus-review-empty');
-  const activeEl = document.getElementById('janus-review-active');
-  if (!janusCurrentReview) {
-    emptyEl.style.display = '';
-    activeEl.style.display = 'none';
+/**
+ * Historique réel des revues d'accès — GET /api/janus/access-reviews?limit=20
+ * (backend commit a51eaff, closes le trou signalé au commit b1dc626 : la
+ * carte n'affichait auparavant que la revue courante en mémoire JS, jamais
+ * un historique persisté). `janusFetch` (pas `apiCall`) pour la même raison
+ * que les autres actions JANUS : distinguer un vrai statut HTTP d'un échec
+ * réseau silencieux.
+ */
+async function loadJanusReviews() {
+  const clientParam = janusClientParam();
+  const qs = clientParam ? `${clientParam}&limit=20` : 'limit=20';
+  const listEl = document.getElementById('janus-reviews-list');
+  const res = await janusFetch(`/janus/access-reviews?${qs}`, {}, 30000);
+  if (!listEl) return;
+  if (!res.ok) {
+    janusReviewsList = [];
+    listEl.innerHTML = `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);padding:8px 0">Aucune donnée — accès insuffisant ou erreur réseau</div>`;
     return;
   }
-  emptyEl.style.display = 'none';
-  activeEl.style.display = '';
-  const { review, findings } = janusCurrentReview;
-  document.getElementById('janus-review-scope').textContent = review.scope;
-  document.getElementById('janus-review-findings-count').textContent = (findings || []).length;
-  const pill = document.getElementById('janus-review-status-pill');
-  pill.textContent = review.status;
-  pill.className = 'status-pill ' + review.status;
-  const summaryInput = document.getElementById('janus-review-summary');
-  const closeBtn = document.getElementById('janus-review-close-btn');
-  if (review.status === 'closed') {
-    summaryInput.value = review.summary || '';
-    summaryInput.disabled = true;
-    closeBtn.style.display = 'none';
-  } else {
-    summaryInput.disabled = false;
-    closeBtn.style.display = janusCanManage() ? '' : 'none';
+  janusReviewsList = res.data?.data || [];
+  renderJanusReviewsList();
+}
+
+const JANUS_REVIEW_SCOPE_LABELS = { full: 'Périmètre complet', ...JANUS_FINDING_TYPE_LABELS };
+
+/** Résumé tronqué à 140 caractères, avec bascule affichage complet/réduit au clic (état gardé dans janusExpandedSummaries, pas dans le DOM — ré-affiché à chaque rendu de la liste). */
+function janusReviewSummaryHtml(r) {
+  if (!r.summary) return '';
+  const isLong = r.summary.length > 140;
+  const expanded = janusExpandedSummaries.has(r.id);
+  const text = !isLong || expanded ? r.summary : r.summary.slice(0, 140) + '…';
+  const toggle = isLong
+    ? ` <span style="color:var(--cyan);font-size:10px;cursor:pointer;white-space:nowrap" onclick="janusToggleReviewSummary('${r.id}')">${expanded ? '(réduire)' : '(voir tout)'}</span>`
+    : '';
+  return `<div style="font-size:12px;color:var(--text);margin-top:8px;line-height:1.5">${escHtml(text)}${toggle}</div>`;
+}
+
+function janusToggleReviewSummary(reviewId) {
+  if (janusExpandedSummaries.has(reviewId)) janusExpandedSummaries.delete(reviewId);
+  else janusExpandedSummaries.add(reviewId);
+  renderJanusReviewsList();
+}
+
+function renderJanusReviewsList() {
+  const listEl = document.getElementById('janus-reviews-list');
+  if (!janusReviewsList.length) {
+    listEl.innerHTML = `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);padding:8px 0">Aucune revue d'accès pour ce tenant — lancez-en une ci-dessous.</div>`;
+    return;
   }
+  listEl.innerHTML = janusReviewsList.map(r => {
+    const dateLabel = r.status === 'closed' && r.closed_at
+      ? `Clôturée le ${new Date(r.closed_at).toLocaleDateString('fr-FR')}`
+      : `Créée le ${new Date(r.created_at).toLocaleDateString('fr-FR')}`;
+    // `findings_reviewed` : colonne réelle de iam_access_reviews, mais pas encore recalculée
+    // côté backend au moment de la clôture (voir docs/janus.md § Phase 2 — reste à 0
+    // aujourd'hui) — affichée telle quelle, jamais un chiffre inventé pour compenser.
+    const closeAction = (r.status === 'in_progress' && janusCanManage())
+      ? `<div style="display:flex;gap:8px;margin-top:10px;align-items:flex-start;flex-wrap:wrap">
+           <textarea class="form-input" id="janus-review-summary-${r.id}" rows="1" placeholder="Laisser vide pour génération automatique" style="flex:1;min-width:180px"></textarea>
+           <button class="action-btn primary" onclick="janusCloseReview('${r.id}')">Clôturer</button>
+         </div>`
+      : '';
+    return `
+      <div style="border:1px solid var(--line);border-radius:4px;padding:12px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div style="font-size:13px;color:var(--text-bright);font-weight:600">${escHtml(JANUS_REVIEW_SCOPE_LABELS[r.scope] || r.scope)}</div>
+          <span class="status-pill ${r.status}">${r.status}</span>
+        </div>
+        <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-top:4px">${r.findings_reviewed ?? 0} finding(s) traité(s) · ${dateLabel}</div>
+        ${janusReviewSummaryHtml(r)}
+        ${closeAction}
+      </div>`;
+  }).join('');
 }
 
 async function janusStartReview() {
@@ -6020,22 +6048,20 @@ async function janusStartReview() {
   showToast('⏳ Lancement de la revue d\'accès...');
   const res = await janusFetch('/janus/access-review', { method: 'POST', body: JSON.stringify(body) }, 60000);
   if (!res.ok) { showToast('❌ ' + (res.data?.error || `Échec (HTTP ${res.status})`)); return; }
-  janusCurrentReview = res.data?.data;
-  renderJanusReviewCard();
   showToast('✅ Revue lancée');
+  await loadJanusReviews(); // await (pas fire-and-forget) : la ligne "in_progress" tout juste créée doit apparaître dans le rendu avant que la fonction ne rende la main
 }
 
-async function janusCloseReview() {
-  if (!janusCurrentReview?.review?.id) return;
-  const summary = document.getElementById('janus-review-summary').value.trim();
+async function janusCloseReview(reviewId) {
+  const summaryInput = document.getElementById(`janus-review-summary-${reviewId}`);
+  const summary = summaryInput ? summaryInput.value.trim() : '';
   showToast(summary ? '⏳ Clôture en cours...' : '⏳ Clôture en cours — génération automatique du résumé...');
-  const res = await janusFetch(`/janus/access-review/${janusCurrentReview.review.id}/close`, {
+  const res = await janusFetch(`/janus/access-review/${reviewId}/close`, {
     method: 'PATCH', body: JSON.stringify(summary ? { summary } : {}),
   }, 60000);
   if (!res.ok) { showToast('❌ ' + (res.data?.error || `Échec (HTTP ${res.status})`)); return; }
-  janusCurrentReview.review = res.data?.data;
-  renderJanusReviewCard();
   showToast('✅ Revue clôturée');
+  await loadJanusReviews(); // await : sans ça, le bouton "Clôturer"/textarea de cette ligne peut encore être présent un instant après le clic (constaté en vérification jsdom)
   loadJanusFindings();
 }
 
