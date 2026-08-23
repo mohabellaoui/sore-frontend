@@ -4598,6 +4598,19 @@ function argusTechBadge(tech) {
   return `<span style="color:${color};font-weight:600">${escHtml(tech)}</span>`;
 }
 
+// Badge générique ok/warn/bad/neutral — réutilisé par les 4 nouvelles
+// sections (email security, CT logs, robots.txt, urlscan) plutôt que
+// répéter le même style inline à chaque badge (~10+ occurrences).
+function argusStatusBadge(level, text) {
+  const styles = {
+    ok: 'background:var(--green-dim);border:1px solid rgba(0,255,136,.25);color:var(--green)',
+    warn: 'background:var(--amber-dim);border:1px solid rgba(255,170,0,.3);color:var(--amber)',
+    bad: 'background:var(--red-dim);border:1px solid rgba(255,45,85,.3);color:var(--red)',
+    neutral: 'background:rgba(100,100,100,.15);border:1px solid rgba(100,100,100,.3);color:var(--text-dim)',
+  };
+  return `<span style="${styles[level] || styles.neutral};padding:5px 10px;border-radius:2px;font-family:var(--font-mono);font-size:10px;display:inline-block">${escHtml(text)}</span>`;
+}
+
 function argusWhoisExpiryCell(whois) {
   const dateStr = whois.expirationDate ? new Date(whois.expirationDate).toLocaleDateString('fr-FR') : null;
   if (whois.daysUntilExpiry == null) return dateStr ? escHtml(dateStr) : '<span style="color:var(--text-dim)">—</span>';
@@ -4928,6 +4941,64 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
           : `Aucune archive trouvée sur Wayback Machine pour ce domaine.`}</p>
       </div>` : '';
 
+  // ── Sections passives complémentaires (backend, ARGUS_EMAIL_SECURITY_CHECKED
+  // / ARGUS_CT_LOGS_CHECKED / ARGUS_ROBOTS_SECURITY_CHECKED / ARGUS_URLSCAN_CHECKED) ──
+  const emailSec = intel?.emailSecurity;
+  const emailSecuritySection = emailSec
+    ? `<div class="argus-report-section">
+        <h4>Sécurité Email (SPF/DKIM/DMARC)</h4>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          ${emailSec.spfRisk === 'ok' ? argusStatusBadge('ok', '✓ SPF hardfail')
+            : emailSec.hasSPF ? argusStatusBadge('warn', `⚠ SPF ${emailSec.spfPolicy}`)
+            : argusStatusBadge('bad', '✗ SPF absent')}
+          ${emailSec.hasDKIM ? argusStatusBadge('ok', `✓ DKIM configuré (${emailSec.dkimSelector})`) : argusStatusBadge('bad', '✗ DKIM absent')}
+          ${emailSec.dmarcPolicy === 'reject' ? argusStatusBadge('ok', '✓ DMARC reject')
+            : emailSec.dmarcPolicy === 'quarantine' ? argusStatusBadge('warn', '⚠ DMARC quarantine')
+            : argusStatusBadge('bad', '✗ DMARC absent ou p=none')}
+        </div>
+        ${emailSec.overallRisk === 'critical'
+          ? `<div class="argus-report-note" style="background:var(--red-dim);border:1px solid rgba(255,45,85,.3);color:var(--red);padding:10px;margin-top:10px;font-style:normal">⚠ L'absence de DMARC permet à n'importe qui d'envoyer des emails depuis @${escHtml(domain)} — risque de phishing critique pour un établissement financier</div>`
+          : ''}
+      </div>` : '';
+
+  const ct = intel?.ctLogs;
+  const ctLogsSection = ct
+    ? `<div class="argus-report-section">
+        <h4>Certificate Transparency (crt.sh)</h4>
+        <p style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim)">Total certificats émis : ${escHtml(ct.totalCerts ?? 0)} — Période : ${ct.oldestCert ? new Date(ct.oldestCert).toLocaleDateString('fr-FR') : '—'} à ${ct.latestCert ? new Date(ct.latestCert).toLocaleDateString('fr-FR') : '—'}</p>
+        ${ct.newSubdomains?.length
+          ? `<div class="argus-report-note" style="background:var(--amber-dim);border:1px solid rgba(255,170,0,.3);color:var(--amber);padding:10px;font-style:normal">⚠ ${ct.newSubdomains.length} sous-domaine(s) découvert(s) via CT logs non présent(s) dans le scan initial</div>
+             <ul style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin:8px 0 0;padding-left:18px">${ct.newSubdomains.map(s => `<li>${escHtml(s)}</li>`).join('')}</ul>`
+          : `<div class="argus-clean-badge">✓ Aucun sous-domaine supplémentaire découvert via CT logs</div>`}
+      </div>` : '';
+
+  const robotsData = intel?.robotsSecurity;
+  const robotsSection = robotsData
+    ? `<div class="argus-report-section">
+        <h4>Chemins Sensibles (robots.txt)</h4>
+        ${!robotsData.robots?.found
+          ? argusStatusBadge('neutral', 'robots.txt non trouvé')
+          : robotsData.robots.sensitivePaths?.length
+            ? `<p style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim);margin-bottom:8px">Chemins sensibles révélés par robots.txt :</p>
+               <div style="display:flex;gap:6px;flex-wrap:wrap">${robotsData.robots.sensitivePaths.map(p => argusStatusBadge(robotsData.robots.risk === 'high' ? 'bad' : 'warn', p)).join('')}</div>`
+            : argusStatusBadge('ok', '✓ Aucun chemin sensible détecté dans robots.txt')}
+        <div style="margin-top:10px">
+          ${robotsData.securityTxt?.found ? argusStatusBadge('ok', '✓ security.txt présent') : argusStatusBadge('neutral', 'Pas de security.txt — aucune politique de divulgation définie')}
+        </div>
+      </div>` : '';
+
+  const urlscanData = intel?.urlscan;
+  const urlscanSection = urlscanData
+    ? `<div class="argus-report-section">
+        <h4>Réputation URLScan</h4>
+        ${!urlscanData.found
+          ? argusStatusBadge('neutral', 'Aucun scan récent disponible')
+          : urlscanData.isMalicious
+            ? argusStatusBadge('bad', `⚠ Domaine signalé comme malveillant (score: ${urlscanData.maliciousScore ?? '?'})`)
+            : argusStatusBadge('ok', `✓ Domaine non signalé (dernier scan : ${urlscanData.lastScanDate ? new Date(urlscanData.lastScanDate).toLocaleDateString('fr-FR') : '—'})`)}
+        ${urlscanData.screenshotUrl ? `<div style="margin-top:8px"><a href="${escHtml(urlscanData.screenshotUrl)}" target="_blank" rel="noopener" style="color:var(--cyan);font-family:var(--font-mono);font-size:11px">Voir le scan complet →</a></div>` : ''}
+      </div>` : '';
+
   const hibpSection = `<div class="argus-report-section">
     <h4>Fuites de données (HIBP)</h4>
     ${hibpBreaches.length
@@ -5015,6 +5086,10 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
     ${whoisSection}
     ${asnSection}
     ${waybackSection}
+    ${emailSecuritySection}
+    ${ctLogsSection}
+    ${robotsSection}
+    ${urlscanSection}
     ${hibpSection}
     ${shodanSection}
     <div class="argus-report-section">
@@ -5261,6 +5336,62 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
         </table>`
       : `<p><span class="badge-green">✓</span> Aucun service sensible exposé détecté.</p>`}`;
 
+  // ── Sections 4g/4h/4i : consigne dit "après Section 4c (WHOIS)", mais les
+  // insérer là physiquement casserait la numérotation (4c, 4g-4i, 4d, 4e,
+  // 4f) — ajoutées ici à la suite de 4f pour garder 4c→4i dans l'ordre.
+  const emailSecPdf = intel?.emailSecurity;
+  const emailSecuritySectionPdf = emailSecPdf
+    ? `<h2>4g. Sécurité Email</h2>
+      <table>
+        <thead><tr><th>Protocole</th><th>Statut</th><th>Politique</th><th>Risque</th></tr></thead>
+        <tbody>
+          <tr class="${emailSecPdf.spfRisk === 'critical' ? 'critical' : emailSecPdf.spfRisk === 'high' ? 'high' : ''}">
+            <td>SPF</td>
+            <td>${emailSecPdf.hasSPF ? '✓' : '✗'}</td>
+            <td>${escHtml(emailSecPdf.spfPolicy || 'absent')}</td>
+            <td>${emailSecPdf.spfRisk === 'ok' ? '<span class="badge-green">OK</span>' : emailSecPdf.spfRisk === 'high' ? '<span class="badge-orange">ÉLEVÉ</span>' : '<span class="badge-red">CRITIQUE</span>'}</td>
+          </tr>
+          <tr class="${!emailSecPdf.hasDKIM ? 'critical' : ''}">
+            <td>DKIM</td>
+            <td>${emailSecPdf.hasDKIM ? '✓' : '✗'}</td>
+            <td>${emailSecPdf.hasDKIM ? `selector: ${escHtml(emailSecPdf.dkimSelector)}` : 'absent'}</td>
+            <td>${emailSecPdf.hasDKIM ? '<span class="badge-green">OK</span>' : '<span class="badge-red">CRITIQUE</span>'}</td>
+          </tr>
+          <tr class="${emailSecPdf.dmarcRisk === 'critical' ? 'critical' : emailSecPdf.dmarcRisk === 'high' ? 'high' : ''}">
+            <td>DMARC</td>
+            <td>${emailSecPdf.hasDMARC ? '✓' : '✗'}</td>
+            <td>${escHtml(emailSecPdf.dmarcPolicy || 'absent')}</td>
+            <td>${emailSecPdf.dmarcRisk === 'ok' ? '<span class="badge-green">OK</span>' : emailSecPdf.dmarcRisk === 'high' ? '<span class="badge-orange">ÉLEVÉ</span>' : '<span class="badge-red">CRITIQUE</span>'}</td>
+          </tr>
+        </tbody>
+      </table>
+      ${!emailSecPdf.hasDMARC ? `<p style="color:#dc2626"><strong>L'absence de DMARC constitue un risque de phishing critique — conformité Bank Al-Maghrib pour un établissement de paiement.</strong></p>` : ''}`
+    : '';
+  // Pas de signal "secteur financier" disponible dans scanData (ni
+  // clients.sector, ni aucun champ équivalent) — la note s'affiche dès que
+  // DMARC est absent plutôt que de deviner le secteur du prospect/client.
+
+  const ctPdf = intel?.ctLogs;
+  const ctLogsSectionPdf = ctPdf
+    ? `<h2>4h. Certificate Transparency</h2>
+      <p>${escHtml(ctPdf.totalCerts ?? 0)} certificats émis depuis ${ctPdf.oldestCert ? escHtml(new Date(ctPdf.oldestCert).toLocaleDateString('fr-FR')) : '—'} — ${escHtml(ctPdf.uniqueSubdomains?.length ?? 0)} sous-domaine(s) unique(s) détecté(s)</p>
+      ${ctPdf.newSubdomains?.length
+        ? `<p><strong>Nouveaux sous-domaines découverts :</strong></p><ul>${ctPdf.newSubdomains.map(s => `<li>${escHtml(s)}</li>`).join('')}</ul>`
+        : ''}`
+    : '';
+
+  const robotsPdf = intel?.robotsSecurity;
+  const robotsSectionPdf = robotsPdf
+    ? `<h2>4i. Chemins Sensibles</h2>
+      ${robotsPdf.robots?.sensitivePaths?.length
+        ? `<table>
+            <thead><tr><th>Chemin</th><th>Niveau de risque</th></tr></thead>
+            <tbody>${robotsPdf.robots.sensitivePaths.map(p => `<tr class="${robotsPdf.robots.risk === 'high' ? 'critical' : 'high'}"><td>${escHtml(p)}</td><td>${robotsPdf.robots.risk === 'high' ? '<span class="badge-red">ÉLEVÉ</span>' : '<span class="badge-orange">MOYEN</span>'}</td></tr>`).join('')}</tbody>
+          </table>`
+        : `<p><span class="badge-green">✓</span> Aucun chemin sensible révélé par robots.txt.</p>`}
+      ${!robotsPdf.securityTxt?.found ? `<p><em>Aucune politique de divulgation responsable (security.txt) définie.</em></p>` : ''}`
+    : '';
+
   // ── Section 5 : recommandations ──
   const recos = [];
   const openFindings = findings.filter(f => !['false_positive', 'remediated'].includes(f.status));
@@ -5294,6 +5425,18 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
     const providers = new Set(intel.asn.map(a => a.asnName).filter(Boolean));
     if (providers.size === 1) recos.push({ level: 'low', text: 'Infrastructure concentrée chez un seul hébergeur cloud — risque de dépendance unique (SPOF fournisseur).', asset: [...providers][0], delay: '< 90 jours' });
   }
+
+  // Règles email security/CT logs/robots.txt (backend, section 4g-4i ci-dessus)
+  if (emailSecPdf) {
+    if (!emailSecPdf.hasDMARC) recos.push({ level: 'critical', text: 'Mise en place DMARC (p=reject) — risque phishing immédiat', asset: domain, delay: 'Immédiat' });
+    if (!emailSecPdf.hasSPF) recos.push({ level: 'critical', text: 'Mise en place SPF — exposition usurpation identité email', asset: domain, delay: 'Immédiat' });
+    if (emailSecPdf.dmarcPolicy === 'none') recos.push({ level: 'high-priority', text: 'Renforcement politique DMARC (none → quarantine → reject)', asset: domain, delay: '< 30 jours' });
+    if (emailSecPdf.spfPolicy === 'softfail') recos.push({ level: 'high-priority', text: 'Renforcement SPF softfail (~all) vers hardfail (-all)', asset: domain, delay: '< 30 jours' });
+    if (!emailSecPdf.hasDKIM) recos.push({ level: 'high-priority', text: 'Mise en place DKIM pour authentification emails', asset: domain, delay: '< 30 jours' });
+  }
+  if (robotsPdf?.robots?.sensitivePaths?.length) recos.push({ level: 'high-priority', text: 'Chemins sensibles révélés par robots.txt — audit accès', asset: `${robotsPdf.robots.sensitivePaths.length} chemin(s)`, delay: '< 30 jours' });
+  if (ctPdf?.newSubdomains?.length) recos.push({ level: 'high-priority', text: 'Sous-domaines découverts via CT logs — inventaire et sécurisation', asset: `${ctPdf.newSubdomains.length} sous-domaine(s)`, delay: '< 30 jours' });
+  if (robotsPdf && !robotsPdf.securityTxt?.found) recos.push({ level: 'low', text: 'Mise en place security.txt — politique de divulgation responsable', asset: domain, delay: '< 90 jours' });
 
   const recosRows = recos.length
     ? recos.map(r => `<tr><td>${argusPdfPriorityBadge(r.level)}</td><td>${escHtml(r.text)}</td><td>${escHtml(r.asset)}</td><td>${escHtml(r.delay)}</td></tr>`).join('')
@@ -5389,6 +5532,9 @@ ${whoisSectionPdf}
 ${asnSectionPdf}
 ${hibpSectionPdf}
 ${shodanSectionPdf}
+${emailSecuritySectionPdf}
+${ctLogsSectionPdf}
+${robotsSectionPdf}
 
 <h2>5. Recommandations Prioritaires</h2>
 <table>
