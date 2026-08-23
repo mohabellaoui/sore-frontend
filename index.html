@@ -4999,6 +4999,87 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
         ${urlscanData.screenshotUrl ? `<div style="margin-top:8px"><a href="${escHtml(urlscanData.screenshotUrl)}" target="_blank" rel="noopener" style="color:var(--cyan);font-family:var(--font-mono);font-size:11px">Voir le scan complet →</a></div>` : ''}
       </div>` : '';
 
+  // ── VirusTotal / Google Dorks / BGP-RPKI (backend, ARGUS_VIRUSTOTAL_CHECKED
+  // / ARGUS_GOOGLE_DORKS_COMPLETED / ARGUS_BGP_RPKI_CHECKED) ──
+  const vtData = intel?.virusTotal;
+  const virusTotalSection = vtData
+    ? `<div class="argus-report-section">
+        <h4>Réputation VirusTotal</h4>
+        ${vtData.skipped
+          ? argusStatusBadge('neutral', 'VirusTotal non configuré')
+          : `<div style="display:flex;gap:10px;flex-wrap:wrap">
+              ${vtData.riskLevel === 'ok'
+                ? argusStatusBadge('ok', `✓ Domaine non signalé (${vtData.harmless} moteurs OK)`)
+                : argusStatusBadge(vtData.riskLevel === 'critical' ? 'bad' : 'warn', `${vtData.malicious} moteur(s) signalent ce domaine`)}
+            </div>
+            ${vtData.riskLevel === 'critical'
+              ? `<div class="argus-report-note" style="background:var(--red-dim);border:1px solid rgba(255,45,85,.3);color:var(--red);padding:10px;margin-top:10px;font-style:normal">⚠ ${vtData.malicious} moteurs antivirus signalent ce domaine comme malveillant</div>`
+              : ''}
+            <p style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim);margin-top:10px">Réputation : ${escHtml(vtData.reputation ?? 0)}/100 | Dernière analyse : ${vtData.lastAnalysisDate ? new Date(vtData.lastAnalysisDate).toLocaleDateString('fr-FR') : '—'}</p>
+            <div style="margin-top:6px"><a href="${escHtml(vtData.vtLink)}" target="_blank" rel="noopener" style="color:var(--cyan);font-family:var(--font-mono);font-size:11px">Voir sur VirusTotal →</a></div>
+            ${vtData.vtSubdomains?.length ? `<div style="margin-top:8px">${argusStatusBadge('warn', `${vtData.vtSubdomains.length} sous-domaine(s) additionnel(s) détecté(s) par VirusTotal`)}</div>` : ''}`}
+      </div>` : '';
+
+  const dorksData = intel?.googleDorks;
+  const googleDorksSection = dorksData
+    ? `<div class="argus-report-section">
+        <h4>Google Dorks — Fichiers &amp; Panels exposés</h4>
+        ${dorksData.skipped
+          ? argusStatusBadge('neutral', 'Google Custom Search non configuré')
+          : (!dorksData.sensitiveFiles?.length && !dorksData.adminPanels?.length && !dorksData.directoryListings?.length)
+            ? argusStatusBadge('ok', '✓ Aucun fichier sensible ou panel indexé')
+            : `${dorksData.sensitiveFiles?.length ? `
+              <div style="margin-top:12px">
+                <p style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim);margin-bottom:6px">📁 Fichiers sensibles indexés</p>
+                <div class="table-wrap"><table class="data-table">
+                  <thead><tr><th>URL</th><th>Type</th><th>Snippet</th><th>Risque</th></tr></thead>
+                  <tbody>${dorksData.sensitiveFiles.map(f => `<tr style="${f.risk === 'critical' ? 'background:rgba(255,45,85,.06)' : 'background:rgba(255,170,0,.06)'}">
+                    <td style="font-family:var(--font-mono);font-size:11px"><a href="${escHtml(f.url)}" target="_blank" rel="noopener" style="color:var(--cyan)">${escHtml(f.url)}</a></td>
+                    <td>${escHtml(f.title || '—')}</td>
+                    <td style="font-size:11px;color:var(--text-dim)">${escHtml(f.snippet || '—')}</td>
+                    <td><span class="sev-badge ${f.risk === 'critical' ? 'critical' : 'medium'}">${escHtml(f.risk)}</span></td>
+                  </tr>`).join('')}</tbody>
+                </table></div>
+              </div>` : ''}
+              ${dorksData.adminPanels?.length ? `
+              <div style="margin-top:12px">
+                <p style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim);margin-bottom:6px">🔑 Interfaces d'administration détectées</p>
+                <div class="table-wrap"><table class="data-table">
+                  <thead><tr><th>URL</th><th>Titre</th><th>Snippet</th></tr></thead>
+                  <tbody>${dorksData.adminPanels.map(f => `<tr style="background:rgba(255,45,85,.06)">
+                    <td style="font-family:var(--font-mono);font-size:11px"><a href="${escHtml(f.url)}" target="_blank" rel="noopener" style="color:var(--cyan)">${escHtml(f.url)}</a></td>
+                    <td>${escHtml(f.title || '—')}</td>
+                    <td style="font-size:11px;color:var(--text-dim)">${escHtml(f.snippet || '—')}</td>
+                  </tr>`).join('')}</tbody>
+                </table></div>
+              </div>` : ''}
+              ${dorksData.directoryListings?.length ? `
+              <div class="argus-report-note" style="background:var(--red-dim);border:1px solid rgba(255,45,85,.3);color:var(--red);padding:10px;margin-top:12px;font-style:normal">📂 Directory listing ouvert — ${dorksData.directoryListings.length} URL(s) exposant directement l'arborescence serveur</div>` : ''}
+              ${dorksData.linkedinIntel?.length ? `
+              <div style="margin-top:12px">
+                <p style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim);margin-bottom:6px">💼 Intelligence LinkedIn — Technologies identifiées depuis les profils et offres d'emploi :</p>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">${(dorksData.techStackFromLinkedIn || []).length ? dorksData.techStackFromLinkedIn.map(t => argusStatusBadge('neutral', t)).join('') : argusStatusBadge('neutral', 'Aucune technologie identifiée')}</div>
+              </div>` : ''}`}
+      </div>` : '';
+
+  const bgpRpkiRows = intel?.bgpRpki || [];
+  const bgpRpkiSection = bgpRpkiRows.length
+    ? `<div class="argus-report-section">
+        <h4>BGP / RPKI — Infrastructure réseau</h4>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>IP</th><th>ASN</th><th>Opérateur</th><th>Préfixe</th><th>RIR</th><th>RPKI</th><th>Risques</th></tr></thead>
+          <tbody>${bgpRpkiRows.map(b => `<tr style="${b.rpki?.state === 'invalid' ? 'background:rgba(255,45,85,.06)' : ''}">
+            <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-bright)">${escHtml(b.ip)}</td>
+            <td style="font-family:var(--font-mono);font-size:11px">${b.asn ? `AS${escHtml(b.asn)}` : '—'}</td>
+            <td>${escHtml(b.asnName || '—')}</td>
+            <td style="font-family:var(--font-mono);font-size:11px">${escHtml(b.prefix || '—')}</td>
+            <td>${escHtml(b.rir || '—')}</td>
+            <td>${b.rpki?.state === 'valid' ? argusStatusBadge('ok', '✓ Valide') : b.rpki?.state === 'invalid' ? argusStatusBadge('bad', '✗ Invalide') : argusStatusBadge('neutral', b.rpki?.state || 'inconnu')}</td>
+            <td>${b.riskFlags?.length ? b.riskFlags.map(f => argusStatusBadge(f === 'RPKI_INVALID' || f === 'HIGH_FRAUD_SCORE' ? 'bad' : 'warn', f)).join(' ') : '<span style="color:var(--text-dim)">—</span>'}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>` : '';
+
   const hibpSection = `<div class="argus-report-section">
     <h4>Fuites de données (HIBP)</h4>
     ${hibpBreaches.length
@@ -5090,6 +5171,9 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
     ${ctLogsSection}
     ${robotsSection}
     ${urlscanSection}
+    ${virusTotalSection}
+    ${googleDorksSection}
+    ${bgpRpkiSection}
     ${hibpSection}
     ${shodanSection}
     <div class="argus-report-section">
@@ -5392,6 +5476,58 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
       ${!robotsPdf.securityTxt?.found ? `<p><em>Aucune politique de divulgation responsable (security.txt) définie.</em></p>` : ''}`
     : '';
 
+  const vtPdf = intel?.virusTotal;
+  const virusTotalSectionPdf = (vtPdf && !vtPdf.skipped)
+    ? `<h2>4j. Réputation VirusTotal</h2>
+      <table>
+        <thead><tr><th>Métrique</th><th>Valeur</th></tr></thead>
+        <tbody>
+          <tr class="${vtPdf.malicious > 0 ? (vtPdf.malicious > 5 ? 'critical' : 'high') : ''}"><td>Moteurs malveillants</td><td>${escHtml(vtPdf.malicious ?? 0)}</td></tr>
+          <tr class="${vtPdf.suspicious > 3 ? 'high' : ''}"><td>Moteurs suspects</td><td>${escHtml(vtPdf.suspicious ?? 0)}</td></tr>
+          <tr><td>Réputation</td><td>${escHtml(vtPdf.reputation ?? 0)}/100</td></tr>
+          <tr><td>Dernière analyse</td><td>${vtPdf.lastAnalysisDate ? escHtml(new Date(vtPdf.lastAnalysisDate).toLocaleDateString('fr-FR')) : '—'}</td></tr>
+          <tr><td>Catégories</td><td>${(vtPdf.categories || []).map(escHtml).join(', ') || '—'}</td></tr>
+        </tbody>
+      </table>
+      <p>${vtPdf.riskLevel === 'critical' ? '<span class="badge-red">CRITIQUE</span>'
+        : vtPdf.riskLevel === 'high' ? '<span class="badge-orange">ÉLEVÉ</span>'
+        : vtPdf.riskLevel === 'medium' ? '<span class="badge-yellow">MOYEN</span>'
+        : '<span class="badge-green">OK</span>'}</p>`
+    : '';
+
+  const dorksPdf = intel?.googleDorks;
+  const dorksCriticalFindingsPdf = dorksPdf
+    ? [...(dorksPdf.sensitiveFiles || []).filter(f => f.risk === 'critical'), ...(dorksPdf.adminPanels || []), ...(dorksPdf.directoryListings || [])]
+    : [];
+  const googleDorksSectionPdf = (dorksPdf && !dorksPdf.skipped && (dorksCriticalFindingsPdf.length || dorksPdf.linkedinIntel?.length))
+    ? `<h2>4k. Google Dorks</h2>
+      ${dorksCriticalFindingsPdf.length ? `
+      <p><strong>Les recherches indexées révèlent des expositions non intentionnelles :</strong></p>
+      <table>
+        <thead><tr><th>Type</th><th>URL</th><th>Risque</th></tr></thead>
+        <tbody>${dorksCriticalFindingsPdf.map(f => `<tr class="${f.risk === 'critical' ? 'critical' : 'high'}"><td>${escHtml(f.category)}</td><td>${escHtml(f.url)}</td><td>${f.risk === 'critical' ? '<span class="badge-red">CRITIQUE</span>' : '<span class="badge-orange">ÉLEVÉ</span>'}</td></tr>`).join('')}</tbody>
+      </table>` : ''}
+      ${dorksPdf.linkedinIntel?.length ? `
+      <p><strong>Stack technique identifiée via sources publiques :</strong></p>
+      <ul>${(dorksPdf.techStackFromLinkedIn || []).length ? dorksPdf.techStackFromLinkedIn.map(t => `<li>${escHtml(t)}</li>`).join('') : '<li>Aucune technologie identifiée</li>'}</ul>` : ''}`
+    : '';
+
+  const bgpRpkiPdf = intel?.bgpRpki || [];
+  const bgpRpkiSectionPdf = bgpRpkiPdf.length
+    ? `<h2>4l. Infrastructure BGP/RPKI</h2>
+      <table>
+        <thead><tr><th>IP</th><th>ASN</th><th>Opérateur</th><th>Préfixe</th><th>RIR</th><th>RPKI</th></tr></thead>
+        <tbody>${bgpRpkiPdf.map(b => `<tr class="${b.rpki?.state === 'invalid' ? 'critical' : ''}">
+          <td>${escHtml(b.ip)}</td>
+          <td>${b.asn ? `AS${escHtml(b.asn)}` : '—'}</td>
+          <td>${escHtml(b.asnName || '—')}</td>
+          <td>${escHtml(b.prefix || '—')}</td>
+          <td>${escHtml(b.rir || '—')}</td>
+          <td>${b.rpki?.state === 'valid' ? '<span class="badge-green">VALIDE</span>' : b.rpki?.state === 'invalid' ? '<span class="badge-red">INVALIDE</span>' : escHtml(b.rpki?.state || 'inconnu')}</td>
+        </tr>`).join('')}</tbody>
+      </table>`
+    : '';
+
   // ── Section 5 : recommandations ──
   const recos = [];
   const openFindings = findings.filter(f => !['false_positive', 'remediated'].includes(f.status));
@@ -5437,6 +5573,25 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
   if (robotsPdf?.robots?.sensitivePaths?.length) recos.push({ level: 'high-priority', text: 'Chemins sensibles révélés par robots.txt — audit accès', asset: `${robotsPdf.robots.sensitivePaths.length} chemin(s)`, delay: '< 30 jours' });
   if (ctPdf?.newSubdomains?.length) recos.push({ level: 'high-priority', text: 'Sous-domaines découverts via CT logs — inventaire et sécurisation', asset: `${ctPdf.newSubdomains.length} sous-domaine(s)`, delay: '< 30 jours' });
   if (robotsPdf && !robotsPdf.securityTxt?.found) recos.push({ level: 'low', text: 'Mise en place security.txt — politique de divulgation responsable', asset: domain, delay: '< 90 jours' });
+
+  // Règles VirusTotal/Google Dorks/BGP-RPKI (backend, section 4j-4l ci-dessus).
+  // sensitiveFiles config/log vs pdf/xls distingués via le risque déjà calculé
+  // côté backend (googleDorkRisk dans src/agents/argus.js : 'critical' pour
+  // ext:env/config/conf/ini/log, 'medium' pour filetype:pdf/xls/xlsx/csv) —
+  // jamais recalculé ici à partir du dork/regex, même principe que
+  // ARGUS_SHODAN_CRITICAL_PORTS plus haut (sévérité toujours lue depuis le backend).
+  if (dorksPdf?.directoryListings?.length) recos.push({ level: 'critical', text: 'Directory listing ouvert — accès direct aux fichiers serveur', asset: `${dorksPdf.directoryListings.length} URL(s)`, delay: 'Immédiat' });
+  const dorksConfigLogFiles = (dorksPdf?.sensitiveFiles || []).filter(f => f.risk === 'critical');
+  if (dorksConfigLogFiles.length) recos.push({ level: 'critical', text: 'Fichiers de configuration indexés par Google — suppression immédiate', asset: `${dorksConfigLogFiles.length} fichier(s)`, delay: 'Immédiat' });
+  if (vtPdf && !vtPdf.skipped && vtPdf.malicious > 0) recos.push({ level: 'critical', text: 'Domaine signalé comme malveillant — investigation urgente', asset: domain, delay: 'Immédiat' });
+  if (bgpRpkiPdf.some(b => b.rpki?.state === 'invalid')) recos.push({ level: 'critical', text: 'Préfixe BGP sans validation RPKI — risque de hijacking', asset: bgpRpkiPdf.find(b => b.rpki?.state === 'invalid').ip, delay: 'Immédiat' });
+
+  if (dorksPdf?.adminPanels?.length) recos.push({ level: 'high-priority', text: 'Interfaces d\'administration indexées — restriction accès IP', asset: `${dorksPdf.adminPanels.length} interface(s)`, delay: '< 15 jours' });
+  if (vtPdf && !vtPdf.skipped && vtPdf.suspicious > 3) recos.push({ level: 'high-priority', text: 'Domaine signalé comme suspect par plusieurs moteurs', asset: domain, delay: '< 30 jours' });
+  const dorksPdfXlsFiles = (dorksPdf?.sensitiveFiles || []).filter(f => f.risk === 'medium');
+  if (dorksPdfXlsFiles.length) recos.push({ level: 'high-priority', text: 'Documents internes indexés — vérifier les permissions', asset: `${dorksPdfXlsFiles.length} document(s)`, delay: '< 30 jours' });
+
+  if (dorksPdf?.techStackFromLinkedIn?.length) recos.push({ level: 'medium', text: 'Stack technique exposée via offres d\'emploi — politique OPSEC à revoir', asset: dorksPdf.techStackFromLinkedIn.join(', '), delay: '< 90 jours' });
 
   const recosRows = recos.length
     ? recos.map(r => `<tr><td>${argusPdfPriorityBadge(r.level)}</td><td>${escHtml(r.text)}</td><td>${escHtml(r.asset)}</td><td>${escHtml(r.delay)}</td></tr>`).join('')
@@ -5535,6 +5690,9 @@ ${shodanSectionPdf}
 ${emailSecuritySectionPdf}
 ${ctLogsSectionPdf}
 ${robotsSectionPdf}
+${virusTotalSectionPdf}
+${googleDorksSectionPdf}
+${bgpRpkiSectionPdf}
 
 <h2>5. Recommandations Prioritaires</h2>
 <table>
