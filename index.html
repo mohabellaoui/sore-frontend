@@ -5027,7 +5027,7 @@ async function argusScanStart() {
     {
       const elapsed = Math.floor((Date.now() - argusScanStartTime) / 1000);
       const assetCount = argusLastScanData?.assets?.length || 0;
-      const findingCount = argusLastScanData?.findings?.length || 0;
+      const findingCount = argusCountFindings(argusLastScanData || {});
       argusShowScanSummary(assetCount, findingCount, elapsed);
     }
     loadArgusScope(); loadArgusAssets(); loadArgusExposures(); loadArgusSummary();
@@ -5053,11 +5053,19 @@ function argusGroupAssetsByValue(assets, exposures) {
   const assetsById = new Map(assets.map(a => [a.id, a]));
   const groups = new Map();
   for (const a of assets) {
-    if (!groups.has(a.asset_value)) groups.set(a.asset_value, { assetValue: a.asset_value, ips: [], tls: null, headers: null, cves: [] });
+    if (!groups.has(a.asset_value)) groups.set(a.asset_value, { assetValue: a.asset_value, ips: [], tls: null, headers: null, status: null, cves: [], riskLevel: null, dnsStatus: null, source: 'DNS' });
     const g = groups.get(a.asset_value);
-    if (a.asset_kind === 'subdomain' && a.details?.resolvedIps) g.ips = a.details.resolvedIps;
+    if (a.asset_kind === 'subdomain') {
+      if (a.details?.resolvedIps) g.ips = a.details.resolvedIps;
+      // riskLevel toujours lu depuis le backend (computeSubdomainRisk, argus.js)
+      // — jamais recalculé ici à partir du nom (même principe que Shodan/Google
+      // Dorks : la sévérité est une donnée serveur, pas une heuristique client).
+      if (a.details?.riskLevel) g.riskLevel = a.details.riskLevel;
+      if (a.details?.dnsStatus) g.dnsStatus = a.details.dnsStatus;
+      if (a.details?.discoveredVia === 'ct_logs') g.source = 'CT Logs';
+    }
     if (a.asset_kind === 'certificate') g.tls = a.details;
-    if (a.asset_kind === 'service') g.headers = a.details?.headers || null;
+    if (a.asset_kind === 'service') { g.headers = a.details?.headers || null; g.status = a.details?.status ?? null; }
   }
   for (const e of exposures) {
     const owner = assetsById.get(e.asset_id);
@@ -5185,6 +5193,144 @@ function argusGroupAndSortRecos(recos) {
     .filter(g => g.items.length > 0);
 }
 
+// Port frontend de computeSubdomainRisk (src/agents/argus.js) — UNIQUEMENT
+// pour les vtSubdomains (jamais des external_assets, donc jamais scorés côté
+// backend — voir scoreSubdomainRisks). Pour un actif réel scanné, TOUJOURS
+// lire g.riskLevel (backend, argusGroupAssetsByValue ci-dessus), jamais
+// recalculer ici — même principe que Shodan/Google Dorks. N'atteint jamais
+// 'critical' : la confirmation Shodan (seule voie vers 'critical' côté
+// backend) n'existe pas pour un sous-domaine jamais scanné.
+function argusComputeSubdomainRiskClientSide(assetValue, hasRealIP) {
+  const val = assetValue.toLowerCase();
+  const isSensitiveName = /^(ftp|sftp|ssh|rdp|smtp|pop|imap)\./i.test(val);
+  const isDevEnv = /\b(staging|dev|uat|rec|recette|preprod|test|demo)\b/i.test(val);
+  const isAdmin = /\b(admin|administrator|panel|dashboard|console|backoffice)\b/i.test(val);
+  if (isSensitiveName || isAdmin) return hasRealIP ? 'high' : 'medium';
+  if (isDevEnv) return hasRealIP ? 'medium' : 'low';
+  return 'low';
+}
+
+// Risque affiché colonne "Risque" de la Section 3 — un CVE confirmé prime
+// toujours sur riskLevel (nommage/DNS), lui-même toujours lu depuis le
+// backend (computeSubdomainRisk), jamais recalculé à partir du nom ici.
+function argusAssetRiskLevel(g) {
+  if (g.cves?.length) {
+    const maxCvss = Math.max(...g.cves.map(c => Number(c.cvss_score) || 0));
+    if (maxCvss >= 9) return 'critical';
+    if (maxCvss >= 7) return 'high';
+    if (maxCvss >= 4) return 'medium';
+  }
+  return g.riskLevel || 'low';
+}
+function argusRiskBadgeScreen(level) {
+  if (level === 'critical') return argusStatusBadge('bad', 'CRITIQUE');
+  if (level === 'high') return argusStatusBadge('bad', 'ÉLEVÉ');
+  if (level === 'medium') return argusStatusBadge('warn', 'MOYEN');
+  return argusStatusBadge('neutral', 'FAIBLE');
+}
+function argusRiskBadgePdf(level) {
+  if (level === 'critical') return '<span class="badge-red">CRITIQUE</span>';
+  if (level === 'high') return '<span class="badge-orange">ÉLEVÉ</span>';
+  if (level === 'medium') return '<span class="badge-yellow">MOYEN</span>';
+  return '<span class="badge-blue">FAIBLE</span>';
+}
+// Source d'un sous-domaine — DNS (résolution active), CT Logs (crt.sh, nom
+// jamais résolu en DNS) ou VT Passif (historique VirusTotal, jamais un
+// external_asset). Couleurs distinctes demandées (gris/bleu/amber) —
+// argusStatusBadge (ok/warn/bad/neutral) n'a pas de bleu, badges dédiés ici.
+function argusAssetSourceBadgeScreen(source) {
+  const styles = {
+    'DNS': 'background:rgba(100,100,100,.15);border:1px solid rgba(100,100,100,.3);color:var(--text-dim)',
+    'CT Logs': 'background:rgba(0,102,204,.15);border:1px solid rgba(0,102,204,.3);color:#0066cc',
+    'VT Passif': 'background:var(--amber-dim);border:1px solid rgba(255,170,0,.3);color:var(--amber)',
+  };
+  return `<span style="${styles[source] || styles['DNS']};padding:3px 8px;border-radius:2px;font-family:var(--font-mono);font-size:9px;display:inline-block;white-space:nowrap">${escHtml(source)}</span>`;
+}
+function argusAssetSourceBadgePdf(source) {
+  if (source === 'CT Logs') return '<span class="badge-blue">CT LOGS</span>';
+  if (source === 'VT Passif') return '<span class="badge-orange">VT PASSIF</span>';
+  return '<span class="badge-gray">DNS</span>';
+}
+
+/**
+ * Compte les findings de sécurité réels (pas seulement github_leak_findings)
+ * pour que "0 finding" ne puisse jamais coexister avec un score CRITIQUE en
+ * Section 6/résumé — CORRECTION 4. `a.details?.riskLevel`, pas `a.risk_level`
+ * (aucune colonne top-level `risk_level` sur external_assets, vérifié dans
+ * migrate.js avant d'écrire cette fonction — le risque vit dans details,
+ * comme tout le reste de ce module, voir computeSubdomainRisk côté backend).
+ */
+function argusCountFindings(scanData) {
+  let count = 0;
+
+  count += (scanData.findings || []).filter(f => f.status !== 'false_positive').length;
+
+  count += (scanData.breaches || []).filter(b =>
+    b.source === 'shodan' && b.status !== 'false_positive'
+  ).length;
+
+  count += (scanData.breaches || []).filter(b =>
+    b.source === 'hibp' && b.status !== 'false_positive'
+  ).length;
+
+  count += (scanData.assets || []).filter(a =>
+    ['critical', 'high'].includes(a.details?.riskLevel)
+  ).length;
+
+  const email = scanData.intel?.emailSecurity;
+  if (email?.overallRisk === 'critical') count++;
+  if (email?.hasDKIM === false && email?.dmarcPolicy !== 'reject') count++;
+
+  const vtNew = (scanData.intel?.virusTotal?.vtSubdomains || []).filter(sub =>
+    !(scanData.assets || []).some(a => a.asset_value === sub)
+  );
+  if (vtNew.length > 0) count++;
+
+  return count;
+}
+
+/**
+ * Recommandations FTP/environnements hors-prod — CORRECTION 2/3 : un nommage
+ * sensible SEUL ne justifie jamais CRITIQUE (signal passif DNS/CT logs, pas
+ * une confirmation active), un environnement hors-prod sans IP résolue ne
+ * justifie jamais ÉLEVÉ. `g.riskLevel` (FTP) et `g.status`/`g.ips` (hors-prod)
+ * viennent tous de argusGroupAssetsByValue — jamais recalculés à partir du
+ * seul nom ici, sauf pour distinguer IP résolue/non résolue (donnée déjà
+ * publique de ce même scan, pas une nouvelle heuristique de sévérité).
+ * Partagée entre argusRenderScanReport et argusGeneratePDFReport.
+ */
+function argusBuildEnvironmentRecos({ assets, rows }) {
+  const recos = [];
+  const bySubdomain = new Map(rows.map(g => [g.assetValue, g]));
+
+  for (const a of (assets || []).filter(x => x.asset_kind === 'subdomain')) {
+    const val = a.asset_value.toLowerCase();
+    const g = bySubdomain.get(a.asset_value);
+    const riskLevel = g?.riskLevel;
+
+    if (/^ftp\./i.test(val)) {
+      if (riskLevel === 'critical') {
+        recos.push({ level: 'critical', text: 'Serveur FTP exposé — port 21 confirmé ouvert (Source : Shodan — confirmation passive)', asset: a.asset_value, delay: 'Immédiat' });
+      } else {
+        recos.push({ level: 'medium', text: 'Enregistrement DNS FTP détecté — exposition port 21 à confirmer par scan actif (Source : nom DNS uniquement — nécessite confirmation par pentest)', asset: a.asset_value, delay: '< 90 jours' });
+      }
+    }
+
+    if (/\b(staging|dev|uat|rec|recette|preprod|test|demo)\b/i.test(val)) {
+      const hasIp = (g?.ips?.length || 0) > 0;
+      const httpConfirmed = [200, 401, 403].includes(g?.status);
+      if (httpConfirmed) {
+        recos.push({ level: 'high', text: `Environnement hors-production répond activement (HTTP ${g.status}) — restriction accès requise`, asset: a.asset_value, delay: '< 15 jours' });
+      } else if (hasIp) {
+        recos.push({ level: 'medium', text: 'Environnement hors-production exposé (IP résolue) — restriction accès recommandée', asset: a.asset_value, delay: '< 30 jours' });
+      } else {
+        recos.push({ level: 'info', text: 'Enregistrement DNS hors-production détecté — aucune confirmation active', asset: a.asset_value, delay: '< 90 jours' });
+      }
+    }
+  }
+  return recos;
+}
+
 // Dernier scan rendu à l'écran — utilisé par argusGeneratePDFReport (le bouton
 // "Générer rapport PDF" n'a pas d'objet scanData en argument inline, il lit
 // cette variable globale ; plus robuste qu'un onclick="...(scanData)" qui
@@ -5200,11 +5346,25 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
   const hibpBreaches = breaches.filter(b => b.source === 'hibp');
   const shodanFindings = argusDedupeShodanFindings(breaches.filter(b => b.source === 'shodan'));
 
+  // AMÉLIORATION — vtSubdomains fusionnés dans l'inventaire principal (Section
+  // 3), tag de source 'VT Passif' pour ceux absents du scan initial. Jamais
+  // un external_asset (jamais scoré côté backend) : risque calculé côté
+  // client via argusComputeSubdomainRiskClientSide (jamais 'critical' — voir
+  // sa doc). La section VirusTotal dédiée reste disponible en complément.
+  const vtOnlyRows = (intel?.virusTotal?.vtSubdomains || [])
+    .filter(sub => !rows.some(g => g.assetValue === sub))
+    .map(sub => ({
+      assetValue: sub, ips: [], tls: null, headers: null, status: null, cves: [],
+      riskLevel: argusComputeSubdomainRiskClientSide(sub, false), dnsStatus: 'unresolved', source: 'VT Passif',
+    }));
+  const allRows = [...rows, ...vtOnlyRows];
+
   const cvssBadgeClass = n => n >= 9 ? 'critical' : n >= 7 ? 'high' : n >= 4 ? 'medium' : 'low';
-  const surfaceRows = rows.length ? rows.map(g => {
+  const surfaceRows = allRows.length ? allRows.map(g => {
     const hasCves = g.cves.length > 0;
     const hasHeaders = g.headers && Object.keys(g.headers).length > 0;
-    const rowStyle = hasCves ? 'background:rgba(255,45,85,.06)' : hasHeaders ? 'background:rgba(255,170,0,.05)' : '';
+    const riskLevel = argusAssetRiskLevel(g);
+    const rowStyle = riskLevel === 'critical' ? 'background:rgba(255,45,85,.06)' : riskLevel === 'high' ? 'background:rgba(255,45,85,.03)' : hasHeaders ? 'background:rgba(255,170,0,.05)' : '';
     const tlsCell = g.tls
       ? (g.tls.expiringSoon ? `<span style="color:var(--amber)">⚠ expire dans ${g.tls.daysUntilExpiry}j</span>` : `<span style="color:var(--green)">✓ valide</span>`)
       : '<span style="color:var(--text-dim)">—</span>';
@@ -5214,15 +5374,22 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
     const cvesCell = hasCves
       ? g.cves.map(c => `<span class="sev-badge ${cvssBadgeClass(Number(c.cvss_score) || 0)}">${escHtml(c.cve_id || '?')}</span>`).join(' ')
       : '<span style="color:var(--text-dim)">—</span>';
+    // Jamais CRITIQUE sur la seule base du nom DNS : un actif sans IP résolue
+    // affiche explicitement 'Non résolu' plutôt qu'un vide ambigu.
+    const ipsCell = g.ips.length
+      ? escHtml(g.ips.join(', '))
+      : `<span style="color:var(--text-dim)">Non résolu${g.source === 'VT Passif' ? ' — historique VT' : ''}</span>`;
     return `<tr style="${rowStyle}">
       <td style="font-weight:600;color:var(--text-bright)">${escHtml(g.assetValue)}</td>
       <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${g.assetValue === domain ? 'domaine racine' : 'sous-domaine'}</td>
-      <td style="font-family:var(--font-mono);font-size:11px">${g.ips.length ? escHtml(g.ips.join(', ')) : '<span style="color:var(--text-dim)">—</span>'}</td>
+      <td>${argusAssetSourceBadgeScreen(g.source || 'DNS')}</td>
+      <td style="font-family:var(--font-mono);font-size:11px">${ipsCell}</td>
       <td>${tlsCell}</td>
       <td style="font-size:11px">${headersCell}</td>
+      <td>${argusRiskBadgeScreen(riskLevel)}</td>
       <td>${cvesCell}</td>
     </tr>`;
-  }).join('') : `<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--text-dim);font-family:var(--font-mono);font-size:11px">Aucun actif découvert</td></tr>`;
+  }).join('') : `<tr><td colspan="8" style="text-align:center;padding:16px;color:var(--text-dim);font-family:var(--font-mono);font-size:11px">Aucun actif découvert</td></tr>`;
 
   const githubSection = findings.length
     ? `<div class="table-wrap"><table class="data-table">
@@ -5516,6 +5683,18 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
     recos.push({ level: 'high', text: `Sous-domaines additionnels découverts via VirusTotal — exposition inconnue à évaluer : ${newVtSubdomains.join(', ')}`, asset: `${newVtSubdomains.length} sous-domaine(s)`, delay: '< 30 jours' });
   }
 
+  // CORRECTION 2/3 — FTP/environnements hors-prod nuancés (jamais CRITIQUE/ÉLEVÉ
+  // sur la seule base du nom DNS), headers fingerprinting rétrogradé en bonne
+  // pratique INFO, DMARC quarantine devient une recommandation d'évolution
+  // INFO plutôt qu'une absence totale de suivi.
+  recos.push(...argusBuildEnvironmentRecos({ assets, rows }));
+  if (rows.some(g => g.headers && Object.keys(g.headers).length > 0)) {
+    recos.push({ level: 'info', text: 'Masquage des headers de fingerprinting (Bonne pratique — niveau INFO)', asset: `${rows.filter(g => g.headers && Object.keys(g.headers).length > 0).length} actif(s)`, delay: '< 90 jours' });
+  }
+  if (emailSec?.dmarcRisk === 'low') {
+    recos.push({ level: 'info', text: 'DMARC quarantine en place — évolution vers reject recommandée', asset: domain, delay: '< 90 jours' });
+  }
+
   const recoGroups = argusGroupAndSortRecos(recos);
 
   document.getElementById('argus-report-title').textContent = `${companyName} — ${domain}`;
@@ -5543,7 +5722,7 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
     <div class="argus-report-section">
       <h4>Surface d'attaque — actifs découverts</h4>
       <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>Sous-domaine</th><th>Type</th><th>IP</th><th>TLS</th><th>Headers exposés (fingerprinting)</th><th>CVEs</th></tr></thead>
+        <thead><tr><th>Sous-domaine</th><th>Type</th><th>Source</th><th>IP</th><th>TLS</th><th>Headers exposés (fingerprinting)</th><th>Risque</th><th>CVEs</th></tr></thead>
         <tbody>${surfaceRows}</tbody>
       </table></div>
     </div>
@@ -5630,8 +5809,12 @@ async function argusGenerateExecutiveSummary(scanData) {
   const criticalPoints = [];
   if (findings.some(f => f.confidence === 'high')) criticalPoints.push('credentials à haute confiance exposés publiquement');
   if (assets.some(a => a.asset_kind === 'certificate' && a.details?.expiringSoon)) criticalPoints.push('certificat(s) TLS proche(s) de l\'expiration');
-  if (assets.some(a => a.asset_kind === 'subdomain' && a.asset_value.startsWith('ftp.'))) criticalPoints.push('service FTP actif détecté');
-  if (assets.some(a => a.asset_kind === 'subdomain' && a.asset_value.startsWith('staging.'))) criticalPoints.push('environnement de staging exposé publiquement');
+  // riskLevel (computeSubdomainRisk, backend) plutôt qu'un nom seul ('ftp.'/
+  // 'staging.') : un nom DNS sans IP résolue ni confirmation Shodan ne
+  // justifie pas d'affirmer un service "actif" dans un résumé exécutif généré
+  // par IA — voir CORRECTION 2/3.
+  if (assets.some(a => a.asset_kind === 'subdomain' && a.details?.riskLevel === 'critical')) criticalPoints.push('service sensible confirmé exposé (ex. FTP) — investigation urgente requise');
+  if (assets.some(a => a.asset_kind === 'subdomain' && /\b(staging|dev|uat|rec|recette|preprod|test|demo)\b/i.test(a.asset_value) && a.details?.resolvedIps?.length)) criticalPoints.push('environnement hors-production exposé publiquement (IP résolue)');
   if (!criticalPoints.length) criticalPoints.push('aucun point critique majeur identifié à ce stade');
 
   const hibpBreachesForPrompt = breaches.filter(b => b.source === 'hibp');
@@ -5701,25 +5884,38 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
   const subdomains = [...new Set(assets.filter(a => a.asset_kind === 'subdomain').map(a => a.asset_value))];
 
   // ── Section 3 : surface d'attaque ──
-  const surfaceRows = rows.length ? rows.map(g => {
-    const isFtp = g.assetValue.startsWith('ftp.');
+  // vtSubdomains fusionnés (AMÉLIORATION 5) + risque toujours lu depuis
+  // g.riskLevel (backend, computeSubdomainRisk) ou argusComputeSubdomainRiskClientSide
+  // pour les vtSubdomains — jamais un nom seul (ex. 'ftp.') qui déclenchait
+  // CRITIQUE à tort. Un CVE confirmé ou un TLS expirant <60j restent
+  // légitimement critiques (donnée réelle, pas une heuristique de nommage).
+  const vtOnlyRowsPdf = (intel?.virusTotal?.vtSubdomains || [])
+    .filter(sub => !rows.some(g => g.assetValue === sub))
+    .map(sub => ({
+      assetValue: sub, ips: [], tls: null, headers: null, status: null, cves: [],
+      riskLevel: argusComputeSubdomainRiskClientSide(sub, false), dnsStatus: 'unresolved', source: 'VT Passif',
+    }));
+  const allRowsPdf = [...rows, ...vtOnlyRowsPdf];
+  const surfaceRows = allRowsPdf.length ? allRowsPdf.map(g => {
     const hasHeaders = g.headers && Object.keys(g.headers).length > 0;
     const tlsExpiringUnder60 = g.tls?.daysUntilExpiry != null && g.tls.daysUntilExpiry < 60;
-    const rowClass = isFtp || tlsExpiringUnder60 ? 'critical' : hasHeaders ? 'high' : '';
+    const assetRisk = tlsExpiringUnder60 ? 'critical' : argusAssetRiskLevel(g);
+    const rowClass = assetRisk === 'critical' ? 'critical' : assetRisk === 'high' ? 'high' : '';
     const tlsCell = g.tls
       ? `${escHtml(g.tls.issuer || '—')} · expire dans ${g.tls.daysUntilExpiry ?? '?'} j.`
       : '—';
     const headersCell = hasHeaders ? escHtml(Object.entries(g.headers).map(([k, v]) => `${k}: ${v}`).join(', ')) : 'aucun';
-    const riskCell = isFtp || tlsExpiringUnder60 ? argusPdfRiskBadge('critical') : hasHeaders ? argusPdfRiskBadge('high-priority') : argusPdfRiskBadge('ok');
+    const ipsCell = g.ips.length ? escHtml(g.ips.join(', ')) : `Non résolu${g.source === 'VT Passif' ? ' — historique VT' : ''}`;
     return `<tr class="${rowClass}">
       <td>${escHtml(g.assetValue)}</td>
       <td>${g.assetValue === domain ? 'Domaine racine' : 'Sous-domaine'}</td>
-      <td>${g.ips.length ? escHtml(g.ips.join(', ')) : '—'}</td>
+      <td>${argusAssetSourceBadgePdf(g.source || 'DNS')}</td>
+      <td>${ipsCell}</td>
       <td>${tlsCell}</td>
       <td>${headersCell}</td>
-      <td>${riskCell}</td>
+      <td>${argusRiskBadgePdf(assetRisk)}</td>
     </tr>`;
-  }).join('') : `<tr><td colspan="6">Aucun actif découvert.</td></tr>`;
+  }).join('') : `<tr><td colspan="7">Aucun actif découvert.</td></tr>`;
 
   const tlsRows = rows.filter(g => g.tls).length
     ? rows.filter(g => g.tls).map(g => `<tr>
@@ -5853,7 +6049,7 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
             <td>DMARC</td>
             <td>${emailSecPdf.hasDMARC ? '✓' : '✗'}</td>
             <td>${escHtml(emailSecPdf.dmarcPolicy || 'absent')}</td>
-            <td>${emailSecPdf.dmarcRisk === 'ok' ? '<span class="badge-green">OK</span>' : emailSecPdf.dmarcRisk === 'high' ? '<span class="badge-orange">ÉLEVÉ</span>' : '<span class="badge-red">CRITIQUE</span>'}</td>
+            <td>${emailSecPdf.dmarcRisk === 'ok' ? '<span class="badge-green">OK</span>' : emailSecPdf.dmarcRisk === 'low' ? '<span class="badge-yellow">MOYEN</span>' : emailSecPdf.dmarcRisk === 'high' ? '<span class="badge-orange">ÉLEVÉ</span>' : '<span class="badge-red">CRITIQUE</span>'}</td>
           </tr>
         </tbody>
       </table>
@@ -5952,13 +6148,16 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
   const openFindings = findings.filter(f => !['false_positive', 'remediated'].includes(f.status));
   openFindings.filter(f => f.confidence === 'high').forEach(f => recos.push({ level: 'critical', text: 'Rotation immédiate des secrets exposés', asset: `${f.repo_url} — ${f.file_path}`, delay: 'Immédiat' }));
   openFindings.filter(f => f.source === 'pastebin').forEach(f => recos.push({ level: 'critical', text: 'Credentials détectés sur Pastebin — rotation immédiate requise', asset: `${f.repo_url}`, delay: 'Immédiat' }));
-  if (assets.some(a => a.asset_kind === 'subdomain' && a.asset_value.startsWith('ftp.')))
-    recos.push({ level: 'critical', text: 'Désactivation du serveur FTP — migration vers SFTP/FTPS', asset: assets.find(a => a.asset_kind === 'subdomain' && a.asset_value.startsWith('ftp.')).asset_value, delay: 'Immédiat' });
   rows.filter(g => g.tls?.daysUntilExpiry != null && g.tls.daysUntilExpiry < 30).forEach(g => recos.push({ level: 'critical', text: 'Renouvellement urgent du certificat TLS', asset: g.assetValue, delay: '< 7 jours' }));
 
-  if (assets.some(a => a.asset_kind === 'subdomain' && a.asset_value.startsWith('staging.')))
-    recos.push({ level: 'high-priority', text: 'Restriction accès staging (VPN/IP whitelist)', asset: assets.find(a => a.asset_kind === 'subdomain' && a.asset_value.startsWith('staging.')).asset_value, delay: '< 15 jours' });
-  rows.filter(g => g.headers && Object.keys(g.headers).length > 0).forEach(g => recos.push({ level: 'high-priority', text: 'Masquage des headers de fingerprinting', asset: g.assetValue, delay: '< 30 jours' }));
+  // CORRECTION 2/3 — FTP/environnements hors-prod nuancés (voir
+  // argusBuildEnvironmentRecos, remplace les anciennes règles inconditionnelles
+  // 'ftp.'→critical / 'staging.'→high-priority) ; headers rétrogradés en
+  // bonne pratique INFO plutôt qu'ÉLEVÉ.
+  recos.push(...argusBuildEnvironmentRecos({ assets, rows }));
+  if (rows.some(g => g.headers && Object.keys(g.headers).length > 0)) {
+    recos.push({ level: 'info', text: 'Masquage des headers de fingerprinting (Bonne pratique — niveau INFO)', asset: `${rows.filter(g => g.headers && Object.keys(g.headers).length > 0).length} actif(s)`, delay: '< 90 jours' });
+  }
   openFindings.filter(f => f.confidence === 'medium').forEach(f => recos.push({ level: 'high-priority', text: 'Audit des repositories et rotation préventive', asset: `${f.repo_url} — ${f.file_path}`, delay: '< 30 jours' }));
   rows.filter(g => g.tls?.daysUntilExpiry != null && g.tls.daysUntilExpiry >= 30 && g.tls.daysUntilExpiry < 60).forEach(g => recos.push({ level: 'high-priority', text: 'Planification renouvellement certificat TLS', asset: g.assetValue, delay: '< 30 jours' }));
 
@@ -5986,6 +6185,10 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
     if (!emailSecPdf.hasDMARC) recos.push({ level: 'critical', text: 'Mise en place DMARC (p=reject) — risque phishing immédiat', asset: domain, delay: 'Immédiat' });
     if (!emailSecPdf.hasSPF) recos.push({ level: 'critical', text: 'Mise en place SPF — exposition usurpation identité email', asset: domain, delay: 'Immédiat' });
     if (emailSecPdf.dmarcPolicy === 'none') recos.push({ level: 'high-priority', text: 'Renforcement politique DMARC (none → quarantine → reject)', asset: domain, delay: '< 30 jours' });
+    // dmarcRisk 'low' = quarantine (voir CORRECTION 3, parseDmarcRecord côté
+    // backend) — protection déjà active, simple évolution recommandée, pas
+    // une lacune à corriger en urgence.
+    if (emailSecPdf.dmarcRisk === 'low') recos.push({ level: 'info', text: 'DMARC quarantine en place — évolution vers reject recommandée', asset: domain, delay: '< 90 jours' });
     if (emailSecPdf.spfPolicy === 'softfail') recos.push({ level: 'high-priority', text: 'Renforcement SPF softfail (~all) vers hardfail (-all)', asset: domain, delay: '< 30 jours' });
     // Niveau dérivé de argusDkimRisk (voir BUG 3 — DKIM absent n'est plus
     // automatiquement CRITIQUE : dépend de la politique DMARC déjà en place).
@@ -6050,7 +6253,7 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
   </div>`;
 
   const prospectBanner = clientStatus === 'prospect'
-    ? `<div class="prospect-banner">Ce rapport est établi dans le cadre d'une évaluation préliminaire. Aucun système n'a été sollicité activement — reconnaissance passive uniquement.</div>`
+    ? `<div class="prospect-banner">Ce rapport est établi par reconnaissance passive (OSINT) uniquement. Aucun système n'a été sollicité activement. Les niveaux de risque indiqués sont des estimations basées sur des données publiques — une confirmation par test d'intrusion actif (pentest) est requise pour valider l'exploitabilité réelle.</div>`
     : '';
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>Rapport ARGUS — ${escHtml(companyName)}</title>
@@ -6069,6 +6272,7 @@ tr:nth-child(even) { background: #f8f8f8; }
 .badge-green { background:#16a34a; color:white; padding:2px 8px; border-radius:4px; font-size:11px; }
 .badge-yellow { background:#ca8a04; color:white; padding:2px 8px; border-radius:4px; font-size:11px; }
 .badge-blue { background:#3b82f6; color:white; padding:2px 8px; border-radius:4px; font-size:11px; }
+.badge-gray { background:#6b7280; color:white; padding:2px 8px; border-radius:4px; font-size:11px; }
 .header-block { border: 2px solid #1a2b5e; padding: 20px; margin-bottom: 30px; }
 .header-block table { margin: 0; }
 .header-block td { border: none; padding: 3px 0; }
@@ -6122,7 +6326,7 @@ ${prospectBanner}
 
 <h2>3. Surface d'Attaque Découverte</h2>
 <table>
-  <thead><tr><th>Actif</th><th>Type</th><th>IPs</th><th>TLS</th><th>Headers exposés</th><th>Risque</th></tr></thead>
+  <thead><tr><th>Actif</th><th>Type</th><th>Source</th><th>IPs</th><th>TLS</th><th>Headers exposés</th><th>Risque</th></tr></thead>
   <tbody>${surfaceRows}</tbody>
 </table>
 
@@ -6152,7 +6356,8 @@ ${recoGroupsHtmlPdf}
 ${recoScoreBoxPdf}
 
 <h2>6. Conclusion</h2>
-<p>Cette évaluation de reconnaissance passive révèle ${assets.length} actif(s) exposé(s) et ${findings.length} finding(s) de sécurité. Sore Security recommande la mise en place d'un programme de surveillance continue de la surface d'attaque ainsi qu'un audit approfondi des points identifiés.</p>
+<p>Cette évaluation de reconnaissance passive révèle ${assets.length} actif(s) exposé(s) et ${argusCountFindings(scanData)} finding(s) de sécurité. Sore Security recommande la mise en place d'un programme de surveillance continue de la surface d'attaque ainsi qu'un audit approfondi des points identifiés.</p>
+<p><em>Les findings marqués "à confirmer" nécessitent un scan actif pour valider l'exposition réelle avant toute action.</em></p>
 <p>Pour toute question ou pour approfondir cette évaluation :<br>contact@sore-security.com — sore-security.com</p>
 
 <footer>
