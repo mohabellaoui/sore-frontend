@@ -4920,7 +4920,11 @@ async function argusScanStart() {
     argusUpdateStepStyles('scan');
     argusAnimateProgress(35, 62, 20000);
     argusStartStatusRotation(ARGUS_PASSIVE_SCAN_MESSAGES, 5000);
-    const scanRes = await argusScanFetch(`/argus/scan/${scopeId}`, { method: 'POST' });
+    // 120000ms — pas le défaut 15000ms de argusScanFetch (largement insuffisant :
+    // enrichissements BGP/RPKI + Wayback + VirusTotal + Google Dorks peuvent porter
+    // le scan passif complet à 90-120s sur Render Free). Retry-on-timeout laissé au
+    // défaut (true, non passé ici) — non demandé par la correction, non touché.
+    const scanRes = await argusScanFetch(`/argus/scan/${scopeId}`, { method: 'POST' }, 120000);
     if (!scanRes.ok) throw new Error(scanRes.data?.error || `Échec scan passif (HTTP ${scanRes.status})`);
     argusStopStatusRotation('Scan passif terminé');
     if (argusProgressAnimation) clearInterval(argusProgressAnimation);
