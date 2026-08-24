@@ -719,6 +719,14 @@ select.form-input option{background:var(--surface)}
 .argus-scan-step.warning{border-color:rgba(255,170,0,.4);color:var(--amber)}
 .argus-scan-step.warning .argus-step-icon{border-color:var(--amber);background:var(--amber-dim);color:var(--amber)}
 @keyframes argus-spin{to{transform:rotate(360deg)}}
+@keyframes argus-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0,180,220,0.5); }
+  50% { box-shadow: 0 0 0 8px rgba(0,180,220,0); }
+}
+@keyframes argus-progress-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
 .argus-scan-status-msg{margin-top:10px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)}
 .argus-scan-status-msg.error{color:var(--red)}
 .argus-scan-status-msg.warning{color:var(--amber)}
@@ -1374,6 +1382,51 @@ select.form-input option{background:var(--surface)}
             <input class="form-input" id="argus-scan-domain" placeholder="Ex. cashplus.ma" autocomplete="off"/>
           </div>
           <button class="action-btn primary" id="argus-scan-launch-btn" onclick="argusScanStart()">▶ Lancer le scan</button>
+        </div>
+
+        <div id="argus-global-progress" style="display:none; margin-bottom:20px;">
+
+          <!-- Label + pourcentage -->
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <span id="argus-progress-label"
+              style="font-size:12px; color:#00b4dc; font-family:'JetBrains Mono',monospace;">
+              Initialisation...
+            </span>
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span id="argus-scan-timer"
+                style="font-size:11px; color:#4a5568; font-family:'JetBrains Mono',monospace;">
+                00:00
+              </span>
+              <span id="argus-progress-pct"
+                style="font-size:12px; color:#00b4dc; font-family:'JetBrains Mono',monospace; font-weight:bold;">
+                0%
+              </span>
+            </div>
+          </div>
+
+          <!-- Barre principale -->
+          <div style="width:100%; height:6px; background:#0a1628; border-radius:3px; overflow:hidden; margin-bottom:8px;">
+            <div id="argus-progress-bar" style="
+              height:100%;
+              width:0%;
+              background:linear-gradient(90deg, #00b4dc, #0066cc);
+              border-radius:3px;
+              transition:width 0.6s ease;
+              box-shadow:0 0 10px rgba(0,180,220,0.5);
+            "></div>
+          </div>
+
+          <!-- Message de statut détaillé -->
+          <div id="argus-status-detail"
+            style="font-size:11px; color:#4a5568; font-family:'JetBrains Mono',monospace; min-height:16px;">
+          </div>
+
+        </div>
+
+        <!-- Résumé final — caché jusqu'à la fin -->
+        <div id="argus-scan-summary" style="display:none; margin-bottom:16px;
+          padding:10px 14px; background:#0a1628; border:1px solid #00b4dc;
+          border-radius:6px; font-family:'JetBrains Mono',monospace; font-size:12px; color:#00b4dc;">
         </div>
 
         <div class="argus-scan-progress" id="argus-scan-progress">
@@ -4500,6 +4553,151 @@ let argusActiveScanSteps = ARGUS_SCAN_STEPS_BASE;
 let argusScanStepStates = {};
 let argusScanRunning = false;
 
+// === BARRE DE PROGRESSION GLOBALE — enrichissement visuel uniquement,
+// aucune donnée de scan supplémentaire : ces fonctions habillent
+// argusScanStart() ci-dessous (seule source de vérité sur l'avancement
+// réel), jamais de logique métier nouvelle.
+
+const ARGUS_PASSIVE_SCAN_MESSAGES = [
+  'Résolution DNS sous-domaines...',
+  'Vérification certificats TLS...',
+  'Analyse headers HTTP...',
+  'Enrichissement WHOIS/ASN...',
+  'Vérification SPF/DKIM/DMARC...',
+  'Certificate Transparency (crt.sh)...',
+  'Analyse robots.txt...',
+  'Réputation URLScan...',
+  'Réputation VirusTotal...',
+  'Validation BGP/RPKI...',
+];
+
+// === SCAN TIMER ===
+let argusScanTimerInterval = null;
+let argusScanStartTime = null;
+
+function argusStartScanTimer() {
+  argusScanStartTime = Date.now();
+  argusScanTimerInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - argusScanStartTime) / 1000);
+    const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const ss = String(elapsed % 60).padStart(2, '0');
+    const el = document.getElementById('argus-scan-timer');
+    if (el) el.textContent = mm + ':' + ss;
+  }, 1000);
+}
+
+function argusStopScanTimer() {
+  if (argusScanTimerInterval) {
+    clearInterval(argusScanTimerInterval);
+    argusScanTimerInterval = null;
+  }
+}
+
+// === PROGRESS BAR UPDATE ===
+let argusProgressAnimation = null;
+
+function argusUpdateProgress(pct, label) {
+  const bar = document.getElementById('argus-progress-bar');
+  const lbl = document.getElementById('argus-progress-label');
+  const pctEl = document.getElementById('argus-progress-pct');
+  const progress = document.getElementById('argus-global-progress');
+
+  if (progress) progress.style.display = 'block';
+  if (bar) bar.style.width = pct + '%';
+  if (lbl) lbl.textContent = label;
+  if (pctEl) pctEl.textContent = pct + '%';
+}
+
+// === ANIMATED PROGRESS (pour les longues étapes) ===
+function argusAnimateProgress(fromPct, toPct, durationMs) {
+  if (argusProgressAnimation) clearInterval(argusProgressAnimation);
+  const steps = 20;
+  const interval = durationMs / steps;
+  const increment = (toPct - fromPct) / steps;
+  let current = fromPct;
+  argusProgressAnimation = setInterval(() => {
+    current += increment;
+    if (current >= toPct) {
+      current = toPct;
+      clearInterval(argusProgressAnimation);
+    }
+    const bar = document.getElementById('argus-progress-bar');
+    const pctEl = document.getElementById('argus-progress-pct');
+    if (bar) bar.style.width = Math.round(current) + '%';
+    if (pctEl) pctEl.textContent = Math.round(current) + '%';
+  }, interval);
+}
+
+// === STATUS DETAIL MESSAGES ===
+let argusStatusRotation = null;
+
+function argusStartStatusRotation(messages, intervalMs) {
+  if (argusStatusRotation) clearInterval(argusStatusRotation);
+  let idx = 0;
+  const el = document.getElementById('argus-status-detail');
+  if (el) el.textContent = messages[0];
+  argusStatusRotation = setInterval(() => {
+    idx = (idx + 1) % messages.length;
+    if (el) el.textContent = messages[idx];
+  }, intervalMs);
+}
+
+function argusStopStatusRotation(finalMessage) {
+  if (argusStatusRotation) {
+    clearInterval(argusStatusRotation);
+    argusStatusRotation = null;
+  }
+  const el = document.getElementById('argus-status-detail');
+  if (el) el.textContent = finalMessage || '';
+}
+
+// === STEP PULSE ANIMATION ===
+// Signature réelle `(stepId)`, pas `(activeStepIndex)` : argusActiveScanSteps
+// (voir plus haut) inclut 'prospect' UNIQUEMENT pour une société inconnue
+// (needsProspectLookup) — un index numérique fixe (0=prospect, 1=scope...)
+// serait donc faux dès que l'étape prospect est absente. Résolu ici en
+// cherchant l'id dans argusActiveScanSteps, cohérent avec
+// argusScanSetStep(id, state) déjà utilisé partout dans argusScanStart().
+// Les étapes déjà en 'error'/'warning' (gérées par .argus-scan-step.error/
+// .warning en CSS) ne sont jamais écrasées ici — seul un enrichissement
+// visuel (pulse cyan / vert / gris) est ajouté par-dessus l'état normal.
+function argusUpdateStepStyles(stepId) {
+  const activeIndex = argusActiveScanSteps.findIndex(s => s.id === stepId);
+  if (activeIndex === -1) return;
+  const nodes = document.querySelectorAll('#argus-scan-steps .argus-scan-step');
+  nodes.forEach((node, i) => {
+    const st = argusScanStepStates[argusActiveScanSteps[i]?.id];
+    if (st === 'error' || st === 'warning') return;
+    const icon = node.querySelector('.argus-step-icon');
+    if (i < activeIndex) {
+      node.style.borderColor = '#16a34a';
+      node.style.color = '#16a34a';
+      node.style.animation = '';
+      if (icon) { icon.style.borderColor = '#16a34a'; icon.style.background = 'transparent'; icon.style.animation = 'none'; }
+    } else if (i === activeIndex) {
+      node.style.borderColor = '#00b4dc';
+      node.style.color = '#00b4dc';
+      node.style.animation = 'argus-pulse 1.5s infinite';
+      if (icon) { icon.style.borderColor = '#00b4dc'; icon.style.animation = 'none'; }
+    } else {
+      node.style.borderColor = '#1a2b3c';
+      node.style.color = '#1a2b3c';
+      node.style.animation = '';
+      if (icon) { icon.style.borderColor = '#1a2b3c'; icon.style.background = 'transparent'; icon.style.animation = 'none'; }
+    }
+  });
+}
+
+// === SCAN SUMMARY ===
+function argusShowScanSummary(assets, findings, elapsed) {
+  const el = document.getElementById('argus-scan-summary');
+  if (!el) return;
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const ss = String(elapsed % 60).padStart(2, '0');
+  el.innerHTML = `✓ Scan terminé en ${mm}:${ss} — ${assets || 0} actifs découverts — ${findings || 0} findings détectés`;
+  el.style.display = 'block';
+}
+
 function argusScanRenderSteps() {
   document.getElementById('argus-scan-steps').innerHTML = argusActiveScanSteps.map(s => {
     const st = argusScanStepStates[s.id] || 'pending';
@@ -4654,6 +4852,9 @@ async function argusScanStart() {
   argusScanStepStates[argusActiveScanSteps[0].id] = 'active';
 
   argusScanRunning = true;
+  argusStartScanTimer();
+  argusUpdateProgress(0, 'Initialisation...');
+  document.getElementById('argus-scan-summary').style.display = 'none';
   document.getElementById('argus-scan-launch-btn').disabled = true;
   document.getElementById('argus-scan-progress').style.display = '';
   document.getElementById('argus-report').style.display = 'none';
@@ -4665,6 +4866,8 @@ async function argusScanStart() {
     // ── ÉTAPE 0 (conditionnelle) — société inconnue en base : POST /api/argus/prospect
     // crée (ou retrouve par nom) un client status='prospect' pour pouvoir scanner.
     if (needsProspectLookup) {
+      argusUpdateProgress(5, 'Création du prospect...');
+      argusUpdateStepStyles('prospect');
       const prospectRes = await argusScanFetch('/argus/prospect', {
         method: 'POST', body: JSON.stringify({ company_name: companyName, domain }),
       });
@@ -4682,6 +4885,8 @@ async function argusScanStart() {
     if (!needsProspectLookup) argusScanSetStatus('Création / vérification du périmètre...');
 
     // ── ÉTAPE 1 — scope (POST /api/argus/scope, ajout manuel — voir note en tête de section)
+    argusUpdateProgress(15, 'Enregistrement du périmètre...');
+    argusUpdateStepStyles('scope');
     let scopeId, scopeRow;
     const scopeRes = await argusScanFetch('/argus/scope', {
       method: 'POST', body: JSON.stringify({ clientId: client.id, assetValue: domain, assetType: 'domain' }),
@@ -4701,6 +4906,8 @@ async function argusScanStart() {
     argusScanSetStatus('Approbation du périmètre...');
 
     // ── ÉTAPE 2 — approbation (skip si déjà approuvé — cas du scope récupéré ci-dessus)
+    argusUpdateProgress(22, 'Approbation du scope...');
+    argusUpdateStepStyles('approve');
     if (scopeRow?.status !== 'approved') {
       const approveRes = await argusScanFetch(`/argus/scope/${scopeId}/approve`, { method: 'PATCH' });
       if (!approveRes.ok) throw new Error(approveRes.data?.error || `Échec approbation (HTTP ${approveRes.status})`);
@@ -4709,9 +4916,17 @@ async function argusScanStart() {
     argusScanSetStatus('Scan passif — DNS, certificats TLS, headers HTTP, corrélation CVE...');
 
     // ── ÉTAPE 3 — scan passif complet
+    argusUpdateProgress(35, 'Reconnaissance passive en cours...');
+    argusUpdateStepStyles('scan');
+    argusAnimateProgress(35, 62, 20000);
+    argusStartStatusRotation(ARGUS_PASSIVE_SCAN_MESSAGES, 5000);
     const scanRes = await argusScanFetch(`/argus/scan/${scopeId}`, { method: 'POST' });
     if (!scanRes.ok) throw new Error(scanRes.data?.error || `Échec scan passif (HTTP ${scanRes.status})`);
+    argusStopStatusRotation('Scan passif terminé');
+    if (argusProgressAnimation) clearInterval(argusProgressAnimation);
     argusScanSetStep('scan', 'done'); argusScanSetStep('assets', 'active');
+    argusUpdateProgress(65, 'Analyse des actifs découverts...');
+    argusUpdateStepStyles('assets');
     argusScanSetStatus('Récupération des actifs découverts...');
 
     // ── ÉTAPE 4 — assets du scope
@@ -4738,6 +4953,10 @@ async function argusScanStart() {
     let githubWarning = null;
     const githubTimedOutAssets = [];
     if (codeLeakTarget) {
+      argusUpdateProgress(72, 'Recherche de credentials exposés...');
+      argusUpdateStepStyles('github');
+      argusAnimateProgress(72, 88, 60000);
+      argusStartStatusRotation(ARGUS_CODE_LEAK_SCAN_MESSAGES, 25000);
       let msgIndex = 0;
       argusScanSetStatus(ARGUS_CODE_LEAK_SCAN_MESSAGES[0]);
       const rotateMsg = setInterval(() => {
@@ -4751,6 +4970,8 @@ async function argusScanStart() {
         }, 300000, false); // pas de retry-on-timeout : passé 5 minutes, retenter doublerait juste l'attente avant l'échec
       } finally {
         clearInterval(rotateMsg);
+        argusStopStatusRotation('Analyse credentials terminée');
+        if (argusProgressAnimation) clearInterval(argusProgressAnimation);
       }
       if (res.ok) {
         argusScanSetStep('github', 'done');
@@ -4766,6 +4987,8 @@ async function argusScanStart() {
       argusScanSetStep('github', 'done'); // aucun actif à scanner — pas une erreur
     }
     argusScanSetStep('report', 'active');
+    argusUpdateProgress(95, 'Génération du rapport...');
+    argusUpdateStepStyles('report');
     argusScanSetStatus(githubWarning ? '⚠ ' + githubWarning : 'Génération du rapport...', githubWarning ? 'warning' : null);
 
     // ── ÉTAPE 6 — findings GitHub + résumé d'exposition + expositions CVE des actifs de ce scope
@@ -4794,11 +5017,23 @@ async function argusScanStart() {
     argusScanSetStatus(githubWarning ? '⚠ Scan terminé avec avertissement — ' + githubWarning : '✅ Scan terminé.', githubWarning ? 'warning' : null);
 
     argusRenderScanReport({ companyName: client.name, domain, scopeId, clientId: client.id, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets, intel, breaches });
+    argusUpdateProgress(100, 'Scan terminé ✓');
+    argusStopScanTimer();
+    argusStopStatusRotation('');
+    {
+      const elapsed = Math.floor((Date.now() - argusScanStartTime) / 1000);
+      const assetCount = argusLastScanData?.assets?.length || 0;
+      const findingCount = argusLastScanData?.findings?.length || 0;
+      argusShowScanSummary(assetCount, findingCount, elapsed);
+    }
     loadArgusScope(); loadArgusAssets(); loadArgusExposures(); loadArgusSummary();
   } catch (e) {
     argusScanMarkActiveAsError();
     argusScanSetStatus('❌ ' + e.message, 'error');
     showToast('❌ ' + e.message);
+    argusStopScanTimer();
+    argusStopStatusRotation('');
+    if (argusProgressAnimation) clearInterval(argusProgressAnimation);
   } finally {
     argusScanRunning = false;
     document.getElementById('argus-scan-launch-btn').disabled = false;
