@@ -5062,6 +5062,125 @@ function argusGroupAssetsByValue(assets, exposures) {
   return [...groups.values()];
 }
 
+// Déduplique les findings Shodan par (ip, port) — backend commit 86ccef7
+// (checkShodan) peut insérer plusieurs lignes argus_breach_findings pour le
+// même service (relances de scan successives sur le même scope), jamais
+// nettoyées côté backend (hors scope de ce correctif, purement défensif ici
+// côté affichage). Partagée entre argusRenderScanReport et
+// argusGeneratePDFReport — même logique, jamais dupliquée.
+function argusDedupeShodanFindings(shodanFindings) {
+  const seen = new Set();
+  return shodanFindings.filter(f => {
+    const key = f.ip + ':' + f.port;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * Risque DKIM dérivé — `checkEmailSecurity` (src/agents/argus.js) ne calcule
+ * pas de `dkimRisk` dédié (seuls spfRisk/dmarcRisk existent côté backend),
+ * et `overallRisk` n'intègre pas DKIM du tout. Corrige le bug où DKIM absent
+ * était marqué CRITIQUE sans tenir compte de la politique DMARC déjà en
+ * place (DMARC reject en place réduit déjà fortement le risque d'un DKIM
+ * manquant). `dmarcPolicy === 'none'` n'est pas listé explicitement dans la
+ * consigne (seuls 'reject'/'quarantine'/hasDMARC=false le sont) — traité
+ * comme 'quarantine' (ÉLEVÉ) par défaut : un DMARC record sans politique
+ * active n'offre pas plus de protection qu'une politique quarantine.
+ */
+function argusDkimRisk(emailSec) {
+  if (emailSec.hasDKIM) return 'ok';
+  if (!emailSec.hasDMARC) return 'critical';
+  if (emailSec.dmarcPolicy === 'reject') return 'medium';
+  return 'high'; // 'quarantine' ou 'none'
+}
+
+// Impact potentiel affiché en dernière colonne des tableaux de recommandations
+// groupées (Section 5) — texte descriptif court dérivé du libellé de la
+// recommandation, jamais une donnée factuelle sur le client. Les 10 premières
+// règles reprennent exactement la table fournie ; les suivantes couvrent les
+// catégories de recommandations existantes qui n'y figuraient pas, même
+// principe. Premier motif qui matche gagne (ordre = spécifique → générique).
+const ARGUS_RECO_IMPACT_RULES = [
+  [/ftp/i, 'Vol de fichiers, compromission credentials'],
+  [/staging/i, 'Exposition code source, données de test'],
+  [/secret|credential|pastebin|repositor/i, "Accès non autorisé à l'API de paiement"],
+  [/certificat/i, 'Interruption de service, avertissement navigateur'],
+  [/headers? (de fingerprinting|exposés)/i, 'Facilite la reconnaissance attaquant'],
+  [/dkim/i, 'Risque de spoofing email'],
+  [/port (8080|8443)/i, "Surface d'attaque élargie"],
+  [/dmarc/i, 'Phishing possible depuis le domaine'],
+  [/virustotal/i, 'Assets non supervisés potentiellement vulnérables'],
+  [/security\.txt/i, 'Absence de canal de signalement vulnérabilités'],
+  [/\bspf\b/i, "Usurpation d'identité par email (spoofing)"],
+  [/directory listing/i, "Accès direct aux fichiers et à l'arborescence serveur"],
+  [/fichiers? de configuration/i, "Fuite de secrets/identifiants via Google"],
+  [/malveillant/i, 'Réputation compromise, blocages emails/navigateurs'],
+  [/administration index/i, 'Cible facilitée pour bruteforce/credential stuffing'],
+  [/documents? interne/i, "Fuite d'informations internes"],
+  [/suspect par plusieurs moteurs/i, 'Risque de blocage par les filtres de réputation'],
+  [/rpki|hijacking/i, 'Risque de détournement de trafic (BGP hijacking)'],
+  [/chemins sensibles/i, 'Révèle des chemins internes aux attaquants'],
+  [/ct logs/i, "Sous-domaines non inventoriés, surface d'attaque cachée"],
+  [/opsec/i, "Facilite le ciblage d'exploits spécifiques à la stack"],
+  [/nom de domaine/i, 'Perte de contrôle du domaine si non renouvelé'],
+  [/hébergeur cloud/i, 'Dépendance à un fournisseur unique, risque de panne globale'],
+  [/inventaire et revue du périmètre/i, "Visibilité incomplète sur la surface exposée"],
+  [/mots de passe/i, "Comptes compromis réutilisables sur d'autres services"],
+  [/service (critique|exposé)/i, 'Service exposé directement à Internet'],
+  [/cve/i, 'Exploitation à distance possible du service vulnérable'],
+];
+function argusRecoImpact(text) {
+  for (const [pattern, impact] of ARGUS_RECO_IMPACT_RULES) {
+    if (pattern.test(text)) return impact;
+  }
+  return "Exposition accrue de la surface d'attaque";
+}
+
+// Groupes de priorité Section 5 — 4 niveaux canoniques. Les deux fonctions
+// (screen/PDF) utilisent des noms de niveau différents historiquement
+// ('critical'/'high'/'medium'/'info' côté écran, 'critical'/'high-priority'/
+// 'medium'/'low' côté PDF) — argusRecoCanonicalLevel absorbe les deux.
+const ARGUS_RECO_LEVEL_META = {
+  critical: { icon: '🔴', label: 'CRITIQUE', sublabel: 'Action immédiate requise', color: '#dc2626', bg: '#1a0505', bgPrint: '#fef2f2', badge: 'badge-red' },
+  high: { icon: '🟠', label: 'ÉLEVÉ', sublabel: 'Intervention sous 30 jours', color: '#ea580c', bg: '#1a0d05', bgPrint: '#fff7ed', badge: 'badge-orange' },
+  medium: { icon: '🟡', label: 'MOYEN', sublabel: 'Planification recommandée', color: '#f59e0b', bg: '#1a1505', bgPrint: '#fffbeb', badge: 'badge-yellow' },
+  info: { icon: '🔵', label: 'INFO', sublabel: 'Bonnes pratiques', color: '#3b82f6', bg: '#05101a', bgPrint: '#eff6ff', badge: 'badge-blue' },
+};
+function argusRecoCanonicalLevel(level) {
+  if (level === 'critical') return 'critical';
+  if (level === 'high-priority' || level === 'high') return 'high';
+  if (level === 'medium') return 'medium';
+  return 'info'; // 'low' ou toute autre valeur — bonnes pratiques, non urgent
+}
+const ARGUS_RECO_DELAY_RANK = { 'Immédiat': 0, '< 7 jours': 1, '< 15 jours': 2, '< 30 jours': 3, '< 60 jours': 4, '< 90 jours': 5 };
+function argusRecoDelayRank(delay) {
+  return ARGUS_RECO_DELAY_RANK[delay] ?? 6;
+}
+/**
+ * Dédoublonne (même texte + même actif — recommandations identiques
+ * générées par deux règles distinctes), regroupe par niveau canonique et
+ * trie chaque groupe par délai. Ne renvoie que les groupes non vides, dans
+ * l'ordre CRITIQUE > ÉLEVÉ > MOYEN > INFO (ordre naturel de
+ * ARGUS_RECO_LEVEL_META ci-dessus).
+ */
+function argusGroupAndSortRecos(recos) {
+  const seen = new Set();
+  const deduped = recos.filter(r => {
+    const key = r.text + '|' + (r.asset || '');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const groups = { critical: [], high: [], medium: [], info: [] };
+  for (const r of deduped) groups[argusRecoCanonicalLevel(r.level)].push(r);
+  for (const key of Object.keys(groups)) groups[key].sort((a, b) => argusRecoDelayRank(a.delay) - argusRecoDelayRank(b.delay));
+  return Object.keys(ARGUS_RECO_LEVEL_META)
+    .map(key => ({ key, ...ARGUS_RECO_LEVEL_META[key], items: groups[key] }))
+    .filter(g => g.items.length > 0);
+}
+
 // Dernier scan rendu à l'écran — utilisé par argusGeneratePDFReport (le bouton
 // "Générer rapport PDF" n'a pas d'objet scanData en argument inline, il lit
 // cette variable globale ; plus robuste qu'un onclick="...(scanData)" qui
@@ -5075,7 +5194,7 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
   argusLastScanData = { companyName, domain, scopeId, clientId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets, intel, breaches };
   const rows = argusGroupAssetsByValue(assets, exposures);
   const hibpBreaches = breaches.filter(b => b.source === 'hibp');
-  const shodanFindings = breaches.filter(b => b.source === 'shodan');
+  const shodanFindings = argusDedupeShodanFindings(breaches.filter(b => b.source === 'shodan'));
 
   const cvssBadgeClass = n => n >= 9 ? 'critical' : n >= 7 ? 'high' : n >= 4 ? 'medium' : 'low';
   const surfaceRows = rows.length ? rows.map(g => {
@@ -5179,6 +5298,7 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
   // ── Sections passives complémentaires (backend, ARGUS_EMAIL_SECURITY_CHECKED
   // / ARGUS_CT_LOGS_CHECKED / ARGUS_ROBOTS_SECURITY_CHECKED / ARGUS_URLSCAN_CHECKED) ──
   const emailSec = intel?.emailSecurity;
+  const dkimRiskLevel = emailSec ? argusDkimRisk(emailSec) : null;
   const emailSecuritySection = emailSec
     ? `<div class="argus-report-section">
         <h4>Sécurité Email (SPF/DKIM/DMARC)</h4>
@@ -5186,7 +5306,10 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
           ${emailSec.spfRisk === 'ok' ? argusStatusBadge('ok', '✓ SPF hardfail')
             : emailSec.hasSPF ? argusStatusBadge('warn', `⚠ SPF ${emailSec.spfPolicy}`)
             : argusStatusBadge('bad', '✗ SPF absent')}
-          ${emailSec.hasDKIM ? argusStatusBadge('ok', `✓ DKIM configuré (${emailSec.dkimSelector})`) : argusStatusBadge('bad', '✗ DKIM absent')}
+          ${emailSec.hasDKIM ? argusStatusBadge('ok', `✓ DKIM configuré (${emailSec.dkimSelector})`)
+            : dkimRiskLevel === 'critical' ? argusStatusBadge('bad', '✗ DKIM absent — CRITIQUE')
+            : dkimRiskLevel === 'high' ? argusStatusBadge('warn', '✗ DKIM absent — ÉLEVÉ')
+            : argusStatusBadge('warn', '✗ DKIM absent — MOYEN')}
           ${emailSec.dmarcPolicy === 'reject' ? argusStatusBadge('ok', '✓ DMARC reject')
             : emailSec.dmarcPolicy === 'quarantine' ? argusStatusBadge('warn', '⚠ DMARC quarantine')
             : argusStatusBadge('bad', '✗ DMARC absent ou p=none')}
@@ -5237,6 +5360,26 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
   // ── VirusTotal / Google Dorks / BGP-RPKI (backend, ARGUS_VIRUSTOTAL_CHECKED
   // / ARGUS_GOOGLE_DORKS_COMPLETED / ARGUS_BGP_RPKI_CHECKED) ──
   const vtData = intel?.virusTotal;
+  // AMÉLIORATION — sous-domaines VirusTotal absents du scan initial (`assets`,
+  // déjà le paramètre local de cette fonction — même donnée qu'argusLastScanData.assets
+  // puisque c'est cette fonction qui vient de l'assigner juste au-dessus, pas besoin
+  // de relire le global mi-render).
+  const newVtSubdomains = (vtData?.vtSubdomains || []).filter(sub => !assets.some(a => a.asset_value === sub));
+  const vtSubdomainsTable = vtData?.vtSubdomains?.length
+    ? `<div style="margin-top:12px">
+        <p style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim);margin-bottom:6px">Sous-domaines détectés passivement par VirusTotal</p>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Sous-domaine</th><th>Présent dans le scan</th><th>Statut</th></tr></thead>
+          <tbody>${vtData.vtSubdomains.map(sub => {
+            const known = assets.some(a => a.asset_value === sub);
+            return `<tr>
+              <td style="font-family:var(--font-mono);font-size:11px">${escHtml(sub)}</td>
+              <td>${known ? '✓ Oui' : '✗ Non'}</td>
+              <td>${known ? argusStatusBadge('neutral', 'Connu') : argusStatusBadge('warn', 'NOUVEAU')}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+      </div>` : '';
   const virusTotalSection = vtData
     ? `<div class="argus-report-section">
         <h4>Réputation VirusTotal</h4>
@@ -5252,7 +5395,8 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
               : ''}
             <p style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim);margin-top:10px">Réputation : ${escHtml(vtData.reputation ?? 0)}/100 | Dernière analyse : ${vtData.lastAnalysisDate ? new Date(vtData.lastAnalysisDate).toLocaleDateString('fr-FR') : '—'}</p>
             <div style="margin-top:6px"><a href="${escHtml(vtData.vtLink)}" target="_blank" rel="noopener" style="color:var(--cyan);font-family:var(--font-mono);font-size:11px">Voir sur VirusTotal →</a></div>
-            ${vtData.vtSubdomains?.length ? `<div style="margin-top:8px">${argusStatusBadge('warn', `${vtData.vtSubdomains.length} sous-domaine(s) additionnel(s) détecté(s) par VirusTotal`)}</div>` : ''}`}
+            ${vtData.vtSubdomains?.length ? `<div style="margin-top:8px">${argusStatusBadge('warn', `${vtData.vtSubdomains.length} sous-domaine(s) additionnel(s) détecté(s) par VirusTotal`)}</div>` : ''}
+            ${vtSubdomainsTable}`}
       </div>` : '';
 
   const dorksData = intel?.googleDorks;
@@ -5356,13 +5500,19 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
 
   const recos = [];
   const openFindings = findings.filter(f => !['false_positive', 'remediated'].includes(f.status));
-  openFindings.filter(f => f.confidence === 'high').forEach(f => recos.push({ sev: 'critical', text: `Secret exposé (${f.finding_type}) dans ${f.repo_url} — ${f.file_path} : faire tourner la valeur immédiatement.` }));
-  exposures.filter(e => e.status === 'open' && Number(e.cvss_score) >= 9).forEach(e => recos.push({ sev: 'critical', text: `CVE critique ${e.cve_id} (CVSS ${e.cvss_score}) sur ${e.detected_service || 'service inconnu'} — patcher en priorité.` }));
-  openFindings.filter(f => f.confidence === 'medium').forEach(f => recos.push({ sev: 'high', text: `Secret potentiellement exposé (${f.finding_type}) dans ${f.repo_url} — vérifier et faire tourner si confirmé.` }));
-  exposures.filter(e => e.status === 'open' && Number(e.cvss_score) >= 7 && Number(e.cvss_score) < 9).forEach(e => recos.push({ sev: 'high', text: `CVE élevée ${e.cve_id} (CVSS ${e.cvss_score}) — planifier le correctif.` }));
-  rows.filter(g => g.tls?.expiringSoon).forEach(g => recos.push({ sev: 'medium', text: `Certificat TLS de ${g.assetValue} expire dans ${g.tls.daysUntilExpiry} jour(s) — renouveler.` }));
-  exposures.filter(e => e.status === 'open' && Number(e.cvss_score) >= 4 && Number(e.cvss_score) < 7).forEach(e => recos.push({ sev: 'medium', text: `CVE modérée ${e.cve_id} (CVSS ${e.cvss_score}).` }));
-  if (!recos.length) recos.push({ sev: 'info', text: 'Aucune action corrective urgente identifiée à ce stade.' });
+  openFindings.filter(f => f.confidence === 'high').forEach(f => recos.push({ level: 'critical', text: `Secret exposé (${f.finding_type}) dans ${f.repo_url} — ${f.file_path} : faire tourner la valeur immédiatement.`, asset: `${f.repo_url} — ${f.file_path}`, delay: 'Immédiat' }));
+  exposures.filter(e => e.status === 'open' && Number(e.cvss_score) >= 9).forEach(e => recos.push({ level: 'critical', text: `CVE critique ${e.cve_id} (CVSS ${e.cvss_score}) sur ${e.detected_service || 'service inconnu'} — patcher en priorité.`, asset: e.detected_service || 'service inconnu', delay: 'Immédiat' }));
+  openFindings.filter(f => f.confidence === 'medium').forEach(f => recos.push({ level: 'high', text: `Secret potentiellement exposé (${f.finding_type}) dans ${f.repo_url} — vérifier et faire tourner si confirmé.`, asset: `${f.repo_url} — ${f.file_path}`, delay: '< 30 jours' }));
+  exposures.filter(e => e.status === 'open' && Number(e.cvss_score) >= 7 && Number(e.cvss_score) < 9).forEach(e => recos.push({ level: 'high', text: `CVE élevée ${e.cve_id} (CVSS ${e.cvss_score}) — planifier le correctif.`, asset: e.detected_service || 'service inconnu', delay: '< 30 jours' }));
+  rows.filter(g => g.tls?.expiringSoon).forEach(g => recos.push({ level: 'medium', text: `Certificat TLS de ${g.assetValue} expire dans ${g.tls.daysUntilExpiry} jour(s) — renouveler.`, asset: g.assetValue, delay: '< 30 jours' }));
+  exposures.filter(e => e.status === 'open' && Number(e.cvss_score) >= 4 && Number(e.cvss_score) < 7).forEach(e => recos.push({ level: 'medium', text: `CVE modérée ${e.cve_id} (CVSS ${e.cvss_score}).`, asset: e.detected_service || 'service inconnu', delay: '< 90 jours' }));
+
+  // AMÉLIORATION — sous-domaines VirusTotal nouveaux (absents du scan initial), voir newVtSubdomains ci-dessus.
+  if (newVtSubdomains.length) {
+    recos.push({ level: 'high', text: `Sous-domaines additionnels découverts via VirusTotal — exposition inconnue à évaluer : ${newVtSubdomains.join(', ')}`, asset: `${newVtSubdomains.length} sous-domaine(s)`, delay: '< 30 jours' });
+  }
+
+  const recoGroups = argusGroupAndSortRecos(recos);
 
   document.getElementById('argus-report-title').textContent = `${companyName} — ${domain}`;
   document.getElementById('argus-report-meta').textContent = `Scan effectué le ${new Date().toLocaleString('fr-FR')}`;
@@ -5413,7 +5563,25 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
     ${shodanSection}
     <div class="argus-report-section">
       <h4>Recommandations</h4>
-      <ul class="argus-reco-list">${recos.map(r => `<li class="argus-reco-item"><span class="sev-badge ${r.sev}">${escHtml(r.sev)}</span>${escHtml(r.text)}</li>`).join('')}</ul>
+      ${recoGroups.length ? recoGroups.map(g => `
+        <div style="border-left:4px solid ${g.color};background:${g.bg};border-radius:4px;padding:12px 14px;margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span style="font-size:13px;font-weight:600;color:${g.color}">${g.icon} ${g.label}</span>
+            <span style="font-size:11px;color:var(--text-dim)">— ${g.sublabel}</span>
+            <span class="sev-badge ${g.key === 'critical' ? 'critical' : g.key === 'high' ? 'high' : g.key === 'medium' ? 'medium' : 'low'}" style="margin-left:auto">${g.items.length} action${g.items.length > 1 ? 's' : ''}</span>
+          </div>
+          <div class="table-wrap"><table class="data-table">
+            <thead><tr><th>#</th><th>Recommandation</th><th>Actif concerné</th><th>Délai</th><th>Impact potentiel</th></tr></thead>
+            <tbody>${g.items.map((r, i) => `<tr>
+              <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${i + 1}</td>
+              <td>${escHtml(r.text)}</td>
+              <td style="font-family:var(--font-mono);font-size:11px">${escHtml(r.asset || '—')}</td>
+              <td style="font-family:var(--font-mono);font-size:11px">${escHtml(r.delay || '—')}</td>
+              <td style="font-size:11px;color:var(--text-dim)">${escHtml(argusRecoImpact(r.text))}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>
+        </div>`).join('')
+        : `<div class="argus-clean-badge">✓ Aucune action corrective urgente identifiée à ce stade.</div>`}
     </div>
   `;
   // `.style.display = ''` retombe sur la règle CSS `.argus-report{display:none}`
@@ -5520,7 +5688,7 @@ function argusPdfTlsStatusBadge(days) {
 function argusBuildPdfReportHtml(scanData, summaryText) {
   const { companyName, domain, assets, exposures, findings, clientStatus, intel, breaches = [] } = scanData;
   const hibpBreaches = breaches.filter(b => b.source === 'hibp');
-  const shodanFindings = breaches.filter(b => b.source === 'shodan');
+  const shodanFindings = argusDedupeShodanFindings(breaches.filter(b => b.source === 'shodan'));
   const rows = argusGroupAssetsByValue(assets, exposures);
   const scanDate = new Date();
   const scanDateLabel = scanDate.toLocaleDateString('fr-FR', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -5659,6 +5827,7 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
   // insérer là physiquement casserait la numérotation (4c, 4g-4i, 4d, 4e,
   // 4f) — ajoutées ici à la suite de 4f pour garder 4c→4i dans l'ordre.
   const emailSecPdf = intel?.emailSecurity;
+  const dkimRiskPdf = emailSecPdf ? argusDkimRisk(emailSecPdf) : null;
   const emailSecuritySectionPdf = emailSecPdf
     ? `<h2>4g. Sécurité Email</h2>
       <table>
@@ -5670,11 +5839,11 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
             <td>${escHtml(emailSecPdf.spfPolicy || 'absent')}</td>
             <td>${emailSecPdf.spfRisk === 'ok' ? '<span class="badge-green">OK</span>' : emailSecPdf.spfRisk === 'high' ? '<span class="badge-orange">ÉLEVÉ</span>' : '<span class="badge-red">CRITIQUE</span>'}</td>
           </tr>
-          <tr class="${!emailSecPdf.hasDKIM ? 'critical' : ''}">
+          <tr class="${dkimRiskPdf === 'critical' ? 'critical' : dkimRiskPdf === 'high' ? 'high' : ''}">
             <td>DKIM</td>
             <td>${emailSecPdf.hasDKIM ? '✓' : '✗'}</td>
             <td>${emailSecPdf.hasDKIM ? `selector: ${escHtml(emailSecPdf.dkimSelector)}` : 'absent'}</td>
-            <td>${emailSecPdf.hasDKIM ? '<span class="badge-green">OK</span>' : '<span class="badge-red">CRITIQUE</span>'}</td>
+            <td>${dkimRiskPdf === 'ok' ? '<span class="badge-green">OK</span>' : dkimRiskPdf === 'critical' ? '<span class="badge-red">CRITIQUE</span>' : dkimRiskPdf === 'high' ? '<span class="badge-orange">ÉLEVÉ</span>' : '<span class="badge-yellow">MOYEN</span>'}</td>
           </tr>
           <tr class="${emailSecPdf.dmarcRisk === 'critical' ? 'critical' : emailSecPdf.dmarcRisk === 'high' ? 'high' : ''}">
             <td>DMARC</td>
@@ -5712,6 +5881,16 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
     : '';
 
   const vtPdf = intel?.virusTotal;
+  const newVtSubdomainsPdf = (vtPdf?.vtSubdomains || []).filter(sub => !assets.some(a => a.asset_value === sub));
+  const vtSubdomainsTablePdf = vtPdf?.vtSubdomains?.length
+    ? `<p><strong>Sous-domaines détectés passivement par VirusTotal</strong></p>
+      <table>
+        <thead><tr><th>Sous-domaine</th><th>Présent dans le scan</th><th>Statut</th></tr></thead>
+        <tbody>${vtPdf.vtSubdomains.map(sub => {
+          const known = assets.some(a => a.asset_value === sub);
+          return `<tr class="${known ? '' : 'high'}"><td>${escHtml(sub)}</td><td>${known ? '✓ Oui' : '✗ Non'}</td><td>${known ? 'Connu' : '<span class="badge-orange">NOUVEAU</span>'}</td></tr>`;
+        }).join('')}</tbody>
+      </table>` : '';
   const virusTotalSectionPdf = (vtPdf && !vtPdf.skipped)
     ? `<h2>4j. Réputation VirusTotal</h2>
       <table>
@@ -5727,7 +5906,8 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
       <p>${vtPdf.riskLevel === 'critical' ? '<span class="badge-red">CRITIQUE</span>'
         : vtPdf.riskLevel === 'high' ? '<span class="badge-orange">ÉLEVÉ</span>'
         : vtPdf.riskLevel === 'medium' ? '<span class="badge-yellow">MOYEN</span>'
-        : '<span class="badge-green">OK</span>'}</p>`
+        : '<span class="badge-green">OK</span>'}</p>
+      ${vtSubdomainsTablePdf}`
     : '';
 
   const dorksPdf = intel?.googleDorks;
@@ -5803,7 +5983,13 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
     if (!emailSecPdf.hasSPF) recos.push({ level: 'critical', text: 'Mise en place SPF — exposition usurpation identité email', asset: domain, delay: 'Immédiat' });
     if (emailSecPdf.dmarcPolicy === 'none') recos.push({ level: 'high-priority', text: 'Renforcement politique DMARC (none → quarantine → reject)', asset: domain, delay: '< 30 jours' });
     if (emailSecPdf.spfPolicy === 'softfail') recos.push({ level: 'high-priority', text: 'Renforcement SPF softfail (~all) vers hardfail (-all)', asset: domain, delay: '< 30 jours' });
-    if (!emailSecPdf.hasDKIM) recos.push({ level: 'high-priority', text: 'Mise en place DKIM pour authentification emails', asset: domain, delay: '< 30 jours' });
+    // Niveau dérivé de argusDkimRisk (voir BUG 3 — DKIM absent n'est plus
+    // automatiquement CRITIQUE : dépend de la politique DMARC déjà en place).
+    if (!emailSecPdf.hasDKIM && dkimRiskPdf !== 'ok') {
+      const dkimRecoLevel = dkimRiskPdf === 'critical' ? 'critical' : dkimRiskPdf === 'high' ? 'high-priority' : 'medium';
+      const dkimRecoDelay = dkimRiskPdf === 'critical' ? 'Immédiat' : '< 30 jours';
+      recos.push({ level: dkimRecoLevel, text: 'Mise en place DKIM pour authentification emails', asset: domain, delay: dkimRecoDelay });
+    }
   }
   if (robotsPdf?.robots?.sensitivePaths?.length) recos.push({ level: 'high-priority', text: 'Chemins sensibles révélés par robots.txt — audit accès', asset: `${robotsPdf.robots.sensitivePaths.length} chemin(s)`, delay: '< 30 jours' });
   if (ctPdf?.newSubdomains?.length) recos.push({ level: 'high-priority', text: 'Sous-domaines découverts via CT logs — inventaire et sécurisation', asset: `${ctPdf.newSubdomains.length} sous-domaine(s)`, delay: '< 30 jours' });
@@ -5828,9 +6014,36 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
 
   if (dorksPdf?.techStackFromLinkedIn?.length) recos.push({ level: 'medium', text: 'Stack technique exposée via offres d\'emploi — politique OPSEC à revoir', asset: dorksPdf.techStackFromLinkedIn.join(', '), delay: '< 90 jours' });
 
-  const recosRows = recos.length
-    ? recos.map(r => `<tr><td>${argusPdfPriorityBadge(r.level)}</td><td>${escHtml(r.text)}</td><td>${escHtml(r.asset)}</td><td>${escHtml(r.delay)}</td></tr>`).join('')
-    : `<tr><td colspan="4">Aucune action corrective urgente identifiée à ce stade.</td></tr>`;
+  // AMÉLIORATION — sous-domaines VirusTotal nouveaux (absents du scan initial), voir newVtSubdomainsPdf ci-dessus.
+  if (newVtSubdomainsPdf.length) {
+    recos.push({ level: 'high-priority', text: `Sous-domaines additionnels découverts via VirusTotal — exposition inconnue à évaluer : ${newVtSubdomainsPdf.join(', ')}`, asset: `${newVtSubdomainsPdf.length} sous-domaine(s)`, delay: '< 30 jours' });
+  }
+
+  // Groupé/dédupliqué/trié par argusGroupAndSortRecos (BUG 2 — dedup Shodan déjà
+  // appliquée en amont sur shodanFindings lui-même, voir argusDedupeShodanFindings).
+  const recoGroupsPdf = argusGroupAndSortRecos(recos);
+  const recoTotalsPdf = { critical: 0, high: 0, medium: 0, info: 0 };
+  recoGroupsPdf.forEach(g => { recoTotalsPdf[g.key] = g.items.length; });
+  const recoGlobalLevel = recoTotalsPdf.critical > 0 ? 'CRITIQUE' : recoTotalsPdf.high > 0 ? 'ÉLEVÉ' : (recoTotalsPdf.medium > 0 || recoTotalsPdf.info > 0) ? 'MOYEN' : 'OK';
+  const recoGlobalColor = recoGlobalLevel === 'CRITIQUE' ? '#dc2626' : recoGlobalLevel === 'ÉLEVÉ' ? '#ea580c' : recoGlobalLevel === 'MOYEN' ? '#f59e0b' : '#16a34a';
+
+  const recoGroupsHtmlPdf = recoGroupsPdf.length
+    ? recoGroupsPdf.map(g => `
+      <div style="background:${g.bgPrint};border-left:4px solid ${g.color};padding:10px 14px;margin:14px 0">
+        <p style="margin:0 0 8px"><strong>${g.icon} ${g.label} — ${g.sublabel}</strong></p>
+        <p style="margin:0 0 8px;font-size:11px">${g.items.length} action${g.items.length > 1 ? 's' : ''} ${g.key === 'critical' ? 'critique' + (g.items.length > 1 ? 's' : '') + ' requise' + (g.items.length > 1 ? 's' : '') + ' immédiatement' : g.key === 'high' ? 'élevée' + (g.items.length > 1 ? 's' : '') + ' à planifier sous 30 jours' : g.key === 'medium' ? 'moyenne' + (g.items.length > 1 ? 's' : '') + ' à planifier' : 'de bonnes pratiques recommandées'}.</p>
+        <table>
+          <thead><tr><th>#</th><th>Recommandation</th><th>Actif concerné</th><th>Délai</th><th>Impact potentiel</th></tr></thead>
+          <tbody>${g.items.map((r, i) => `<tr><td>${i + 1}</td><td>${escHtml(r.text)}</td><td>${escHtml(r.asset)}</td><td>${escHtml(r.delay)}</td><td>${escHtml(argusRecoImpact(r.text))}</td></tr>`).join('')}</tbody>
+        </table>
+      </div>`).join('')
+    : `<p><span class="badge-green">✓</span> Aucune action corrective urgente identifiée à ce stade.</p>`;
+
+  const recoScoreBoxPdf = `<div style="border:2px solid ${recoGlobalColor};border-radius:6px;padding:14px 18px;margin-top:16px">
+    <p style="margin:0 0 8px"><strong>SCORE DE RISQUE GLOBAL</strong></p>
+    <p style="margin:0 0 8px">🔴 Critique : ${recoTotalsPdf.critical} &nbsp;&nbsp; 🟠 Élevé : ${recoTotalsPdf.high} &nbsp;&nbsp; 🟡 Moyen : ${recoTotalsPdf.medium} &nbsp;&nbsp; 🔵 Info : ${recoTotalsPdf.info}</p>
+    <p style="margin:0"><strong>Niveau global : <span style="color:${recoGlobalColor}">${recoGlobalLevel}</span></strong></p>
+  </div>`;
 
   const prospectBanner = clientStatus === 'prospect'
     ? `<div class="prospect-banner">Ce rapport est établi dans le cadre d'une évaluation préliminaire. Aucun système n'a été sollicité activement — reconnaissance passive uniquement.</div>`
@@ -5851,6 +6064,7 @@ tr:nth-child(even) { background: #f8f8f8; }
 .badge-orange { background:#ea580c; color:white; padding:2px 8px; border-radius:4px; font-size:11px; }
 .badge-green { background:#16a34a; color:white; padding:2px 8px; border-radius:4px; font-size:11px; }
 .badge-yellow { background:#ca8a04; color:white; padding:2px 8px; border-radius:4px; font-size:11px; }
+.badge-blue { background:#3b82f6; color:white; padding:2px 8px; border-radius:4px; font-size:11px; }
 .header-block { border: 2px solid #1a2b5e; padding: 20px; margin-bottom: 30px; }
 .header-block table { margin: 0; }
 .header-block td { border: none; padding: 3px 0; }
@@ -5930,10 +6144,8 @@ ${googleDorksSectionPdf}
 ${bgpRpkiSectionPdf}
 
 <h2>5. Recommandations Prioritaires</h2>
-<table>
-  <thead><tr><th>Priorité</th><th>Recommandation</th><th>Actif concerné</th><th>Délai suggéré</th></tr></thead>
-  <tbody>${recosRows}</tbody>
-</table>
+${recoGroupsHtmlPdf}
+${recoScoreBoxPdf}
 
 <h2>6. Conclusion</h2>
 <p>Cette évaluation de reconnaissance passive révèle ${assets.length} actif(s) exposé(s) et ${findings.length} finding(s) de sécurité. Sore Security recommande la mise en place d'un programme de surveillance continue de la surface d'attaque ainsi qu'un audit approfondi des points identifiés.</p>
