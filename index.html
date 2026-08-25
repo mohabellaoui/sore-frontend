@@ -781,6 +781,7 @@ select.form-input option{background:var(--surface)}
   .tb-nav .tb-btn span{display:none}
 }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -1432,6 +1433,43 @@ select.form-input option{background:var(--surface)}
         <div class="argus-scan-progress" id="argus-scan-progress">
           <div class="argus-scan-steps" id="argus-scan-steps"></div>
           <div class="argus-scan-status-msg" id="argus-scan-status-msg">—</div>
+        </div>
+      </div>
+
+      <!-- ══ SCAN EN MASSE — plusieurs sociétés en une fois ══
+           Phase A (prospect+scope+approve) et Phase C (lecture findings) sont
+           parallélisées par société (aucune dépendance externe) ; Phase B (scan
+           passif, qui sollicite Shodan/VirusTotal/HudsonRock) est limitée à
+           SCAN_CONCURRENCY scans simultanés pour ne pas se faire rate-limiter. -->
+      <div class="argus-scan-panel" id="argus-bulk-panel">
+        <div class="card-title" style="margin:0 0 14px"><span class="dot" style="background:var(--amber)"></span>Scan en masse</div>
+        <div class="form-group">
+          <label class="form-label">Sociétés à scanner — une par ligne, format "Société;domaine" (ou juste le domaine)</label>
+          <textarea class="form-input" id="argus-bulk-input" rows="5" style="font-family:var(--font-mono);font-size:12px;resize:vertical" placeholder="Cash Plus;cashplus.ma&#10;Exemple SA;example.ma&#10;autresociete.ma"></textarea>
+        </div>
+        <button class="action-btn primary" id="argus-bulk-start-btn" onclick="argusBulkScanStart()">▶ Lancer le scan en masse</button>
+
+        <div id="argus-bulk-dashboard" style="display:none;margin-top:20px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span id="argus-bulk-eta" style="font-size:12px;color:#00b4dc;font-family:'JetBrains Mono',monospace">—</span>
+            <button class="action-btn" id="argus-bulk-export-btn" style="display:none" onclick="argusBulkExportAll()">📊 Export Excel</button>
+          </div>
+          <div style="width:100%;height:6px;background:#0a1628;border-radius:3px;overflow:hidden;margin-bottom:16px">
+            <div id="argus-bulk-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#00b4dc,#0066cc);border-radius:3px;transition:width 0.6s ease"></div>
+          </div>
+
+          <div class="stats-grid" style="margin-bottom:16px">
+            <div class="stat-card" id="bulk-stat-total"><div class="stat-label-top">Total</div><div class="stat-val">0</div></div>
+            <div class="stat-card cyan" id="bulk-stat-running"><div class="stat-label-top">En cours</div><div class="stat-val cyan">0</div></div>
+            <div class="stat-card" id="bulk-stat-done"><div class="stat-label-top">Terminés</div><div class="stat-val" style="color:var(--green)">0</div></div>
+            <div class="stat-card red" id="bulk-stat-error"><div class="stat-label-top">Erreurs</div><div class="stat-val red">0</div></div>
+            <div class="stat-card amber" id="bulk-stat-findings"><div class="stat-label-top">Findings totaux</div><div class="stat-val amber">0</div></div>
+          </div>
+
+          <div class="table-wrap"><table class="data-table" id="argus-bulk-table">
+            <thead><tr><th>#</th><th>Société</th><th>Domaine</th><th>Statut</th><th>Findings</th><th>Score</th><th>Détail</th></tr></thead>
+            <tbody id="argus-bulk-tbody"></tbody>
+          </table></div>
         </div>
       </div>
 
@@ -4552,6 +4590,8 @@ const ARGUS_SHODAN_CRITICAL_PORTS = [21, 23, 3389, 5900, 6379, 27017, 5432, 3306
 let argusActiveScanSteps = ARGUS_SCAN_STEPS_BASE;
 let argusScanStepStates = {};
 let argusScanRunning = false;
+let argusBulkEntries = [];
+let argusBulkRunning = false;
 
 // === BARRE DE PROGRESSION GLOBALE — enrichissement visuel uniquement,
 // aucune donnée de scan supplémentaire : ces fonctions habillent
@@ -5056,6 +5096,422 @@ async function argusScanStart() {
     argusScanRunning = false;
     document.getElementById('argus-scan-launch-btn').disabled = false;
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// SCAN EN MASSE — plusieurs sociétés en une fois. Réutilise argusScanFetch
+// (jamais de rejet — renvoie toujours {ok, status, data}, voir commentaire
+// dans argusScanStart) et les mêmes routes /api/argus/... que le scan
+// individuel ci-dessus, jamais une nouvelle API dupliquée.
+// ═══════════════════════════════════════════════════════════════════════
+
+// Parse "Société;domaine" / "Société,domaine" / juste "domaine" par ligne
+// (dans ce dernier cas la société est dérivée du premier label du domaine).
+// Lignes vides ou dont le domaine ne ressemble pas à un hostname valide sont
+// ignorées silencieusement (même esprit que argusScanDomain, qui ne valide
+// pas non plus côté client — la validation réelle est côté backend). Les
+// doublons de domaine dans la saisie sont dédupliqués.
+const ARGUS_BULK_DOMAIN_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+function argusBulkParse(text) {
+  const lines = (text || '').split('\n').map(l => l.trim()).filter(Boolean);
+  const entries = [];
+  const seenDomains = new Set();
+  for (const line of lines) {
+    const parts = line.split(/[;,]/).map(p => p.trim()).filter(Boolean);
+    let company, domain;
+    if (parts.length >= 2) { company = parts[0]; domain = parts[1].toLowerCase(); }
+    else { domain = (parts[0] || '').toLowerCase(); company = domain ? domain.split('.')[0].replace(/^./, c => c.toUpperCase()) : ''; }
+    if (!domain || !ARGUS_BULK_DOMAIN_RE.test(domain) || seenDomains.has(domain)) continue;
+    seenDomains.add(domain);
+    entries.push({ company, domain, status: 'pending', phase: 'pending', clientId: null, scopeId: null, findings: 0, score: null, error: null, scanData: null });
+  }
+  return entries;
+}
+
+function argusBulkStatusBadge(entry) {
+  if (entry.status === 'error') return argusStatusBadge('bad', 'Erreur');
+  if (entry.status === 'done') return argusStatusBadge('ok', 'Terminé');
+  if (entry.status === 'running') return argusStatusBadge('warn', 'En cours...');
+  return argusStatusBadge('neutral', 'En attente');
+}
+function argusBulkScoreBadge(score) {
+  if (score === 'CRITIQUE') return argusStatusBadge('bad', 'CRITIQUE');
+  if (score === 'ÉLEVÉ') return argusStatusBadge('warn', 'ÉLEVÉ');
+  if (score === 'MOYEN') return argusStatusBadge('neutral', 'MOYEN');
+  if (score === 'OK') return argusStatusBadge('ok', 'OK');
+  return '—';
+}
+function argusBulkRowHtml(i, e) {
+  return `<tr id="argus-bulk-row-${i}">
+    <td>${i + 1}</td>
+    <td>${escHtml(e.company)}</td>
+    <td style="font-family:var(--font-mono);font-size:11px">${escHtml(e.domain)}</td>
+    <td>${argusBulkStatusBadge(e)}</td>
+    <td>${e.status === 'done' ? e.findings : '—'}</td>
+    <td>${e.status === 'done' ? argusBulkScoreBadge(e.score) : '—'}</td>
+    <td style="font-size:11px;color:var(--text-dim)">${e.status === 'error' ? escHtml(e.error || '—') : '—'}</td>
+  </tr>`;
+}
+function argusBulkRenderTable(entries) {
+  document.getElementById('argus-bulk-tbody').innerHTML = entries.map((e, i) => argusBulkRowHtml(i, e)).join('');
+}
+function argusBulkUpdateRow(i, e) {
+  const row = document.getElementById(`argus-bulk-row-${i}`);
+  if (row) row.outerHTML = argusBulkRowHtml(i, e);
+}
+function argusBulkUpdateStatus(msg) {
+  const el = document.getElementById('argus-bulk-eta');
+  if (el) el.textContent = msg;
+}
+
+async function argusBulkScanStart() {
+  if (argusBulkRunning) return;
+
+  const text = document.getElementById('argus-bulk-input').value;
+  argusBulkEntries = argusBulkParse(text);
+  if (argusBulkEntries.length === 0) { showToast('⚠ Aucun domaine valide.'); return; }
+
+  argusBulkRunning = true;
+  const btn = document.getElementById('argus-bulk-start-btn');
+  btn.textContent = '⏸ Scan en cours...';
+  btn.disabled = true;
+
+  document.getElementById('argus-bulk-dashboard').style.display = 'block';
+  document.getElementById('argus-bulk-export-btn').style.display = 'none';
+  document.getElementById('argus-bulk-progress-bar').style.width = '0%';
+  argusBulkRenderTable(argusBulkEntries);
+  document.querySelector('#bulk-stat-total .stat-val').textContent = argusBulkEntries.length;
+  document.querySelector('#bulk-stat-running .stat-val').textContent = '0';
+  document.querySelector('#bulk-stat-done .stat-val').textContent = '0';
+  document.querySelector('#bulk-stat-error .stat-val').textContent = '0';
+  document.querySelector('#bulk-stat-findings .stat-val').textContent = '0';
+
+  const startTime = Date.now();
+  const SCAN_CONCURRENCY = 2; // Max scans passifs simultanés (Shodan/VirusTotal/HudsonRock)
+
+  // ══ PHASE A — prospect + scope + approve, en parallèle (aucune dépendance externe) ══
+  argusBulkUpdateStatus('Phase 1/3 — Préparation des scopes...');
+
+  await Promise.all(argusBulkEntries.map(async (entry, i) => {
+    try {
+      // Prospect — POST /api/argus/prospect renvoie {clientId, status, created}
+      // directement sur .data (pas de niveau .data.data ici), voir argusScanStart.
+      const pRes = await argusScanFetch('/argus/prospect', {
+        method: 'POST', body: JSON.stringify({ company_name: entry.company, domain: entry.domain }),
+      }, 15000);
+      if (!pRes.ok) throw new Error(pRes.data?.error || `Prospect: HTTP ${pRes.status}`);
+      entry.clientId = pRes.data?.clientId;
+
+      // Scope — POST /api/argus/scope, 400 "déjà enregistré" = scope existant à récupérer
+      // (voir argusScanStart : seul ce message précis signale un doublon, tout autre 400
+      // est une vraie erreur de validation qu'il ne faut jamais avaler silencieusement).
+      let scopeRow;
+      const sRes = await argusScanFetch('/argus/scope', {
+        method: 'POST', body: JSON.stringify({ clientId: entry.clientId, assetValue: entry.domain, assetType: 'domain' }),
+      }, 15000);
+      if (sRes.ok) {
+        scopeRow = sRes.data?.data;
+        entry.scopeId = scopeRow?.id;
+      } else if (sRes.status === 400 && /déjà enregistré/i.test(sRes.data?.error || '')) {
+        const exRes = await argusScanFetch(`/argus/scope?clientId=${entry.clientId}`, {}, 10000);
+        scopeRow = (exRes.data?.data || []).find(s => s.asset_value === entry.domain);
+        entry.scopeId = scopeRow?.id;
+        if (!entry.scopeId) throw new Error('Scope signalé comme déjà existant mais introuvable.');
+      } else {
+        throw new Error(sRes.data?.error || `Scope: HTTP ${sRes.status}`);
+      }
+
+      // Approve — skip si déjà approuvé (scope récupéré ci-dessus).
+      if (scopeRow?.status !== 'approved') {
+        const aRes = await argusScanFetch(`/argus/scope/${entry.scopeId}/approve`, { method: 'PATCH' }, 10000);
+        if (!aRes.ok) throw new Error(aRes.data?.error || `Approve: HTTP ${aRes.status}`);
+      }
+
+      entry.phase = 'ready';
+    } catch (err) {
+      entry.status = 'error';
+      entry.error = err.message;
+      entry.phase = 'error';
+      argusBulkUpdateRow(i, entry);
+    }
+  }));
+
+  document.getElementById('argus-bulk-progress-bar').style.width = '20%';
+
+  // ══ PHASE B — scans passifs, concurrence limitée (contrainte APIs externes) ══
+  argusBulkUpdateStatus(`Phase 2/3 — Scans passifs (max ${SCAN_CONCURRENCY} simultanés)...`);
+
+  const readyEntries = argusBulkEntries.map((e, i) => ({ entry: e, idx: i })).filter(({ entry }) => entry.phase === 'ready');
+  let activeScans = 0, completedScans = 0;
+
+  await new Promise(resolve => {
+    let queueIdx = 0;
+    function tryLaunchNext() {
+      while (activeScans < SCAN_CONCURRENCY && queueIdx < readyEntries.length) {
+        const { entry, idx } = readyEntries[queueIdx++];
+        activeScans++;
+        entry.status = 'running';
+        argusBulkUpdateRow(idx, entry);
+        document.querySelector('#bulk-stat-running .stat-val').textContent = activeScans;
+
+        // 120000ms — même timeout que le scan individuel (argusScanStart) :
+        // BGP/RPKI + Wayback + VirusTotal + Google Dorks + la nouvelle sécurité
+        // DNS étendue peuvent porter un scan passif complet à 90-120s.
+        argusScanFetch(`/argus/scan/${entry.scopeId}`, { method: 'POST' }, 120000)
+          .then(res => {
+            if (!res.ok) throw new Error(res.data?.error || `Scan: HTTP ${res.status}`);
+            entry.phase = 'scanned';
+          })
+          .catch(err => {
+            entry.phase = 'error';
+            entry.status = 'error';
+            entry.error = err.message;
+            argusBulkUpdateRow(idx, entry);
+          })
+          .finally(() => {
+            activeScans--;
+            completedScans++;
+            const pct = Math.round((completedScans / readyEntries.length) * 70);
+            document.getElementById('argus-bulk-progress-bar').style.width = (20 + pct) + '%';
+            document.querySelector('#bulk-stat-running .stat-val').textContent = activeScans;
+            tryLaunchNext();
+            if (activeScans === 0 && queueIdx >= readyEntries.length) resolve();
+          });
+      }
+    }
+    tryLaunchNext();
+    if (readyEntries.length === 0) resolve();
+  });
+
+  // ══ PHASE C — récupération des findings, en parallèle (lecture DB seule) ══
+  argusBulkUpdateStatus('Phase 3/3 — Récupération des findings...');
+
+  let doneCount = 0, errorCount = 0, totalFindings = 0;
+
+  await Promise.all(argusBulkEntries.map(async (entry, i) => {
+    if (entry.phase !== 'scanned') {
+      if (entry.status === 'error') errorCount++;
+      return;
+    }
+    // argusScanFetch ne rejette jamais (voir argusScanStart) — Promise.all
+    // suffit, comme pour le scan individuel, pas besoin d'allSettled ici.
+    const [assetsRes, ghRes, breachRes, dnsRes, intelRes] = await Promise.all([
+      argusScanFetch(`/argus/assets?clientId=${entry.clientId}&scopeId=${entry.scopeId}`, {}, 15000),
+      argusScanFetch(`/argus/findings/github-leaks?clientId=${entry.clientId}&scopeId=${entry.scopeId}`, {}, 15000),
+      argusScanFetch(`/argus/findings/breaches?clientId=${entry.clientId}&scopeId=${entry.scopeId}`, {}, 15000, false),
+      argusScanFetch(`/argus/findings/dns?clientId=${entry.clientId}&scopeId=${entry.scopeId}`, {}, 15000, false),
+      argusScanFetch(`/argus/intel?clientId=${entry.clientId}&scopeId=${entry.scopeId}`, {}, 30000, false),
+    ]);
+
+    if (!assetsRes.ok) {
+      entry.status = 'error';
+      entry.error = assetsRes.data?.error || `Actifs: HTTP ${assetsRes.status}`;
+      errorCount++;
+      argusBulkUpdateRow(i, entry);
+      return;
+    }
+
+    const assets = assetsRes.data?.data || [];
+    const ghF = ghRes.data?.data || [];
+    const breachF = breachRes.ok ? breachRes.data?.data || [] : [];
+    const dnsF = dnsRes.ok ? dnsRes.data?.data || [] : [];
+    const intel = intelRes.ok ? intelRes.data?.data || null : null;
+
+    const allF = [...ghF, ...breachF, ...dnsF];
+    entry.findings = allF.length;
+    totalFindings += entry.findings;
+
+    // ghF (credentials exposés) porte `confidence`, pas `severity` — voir
+    // argusBuildPdfReportHtml (openFindings.filter(f => f.confidence === ...)).
+    const critCount = breachF.filter(f => f.severity === 'critical').length
+      + dnsF.filter(f => f.severity === 'critical').length
+      + ghF.filter(f => f.confidence === 'high').length;
+    const highCount = breachF.filter(f => f.severity === 'high').length
+      + dnsF.filter(f => f.severity === 'high').length
+      + ghF.filter(f => f.confidence === 'medium').length;
+    entry.score = critCount > 0 ? 'CRITIQUE' : highCount > 0 ? 'ÉLEVÉ' : entry.findings > 0 ? 'MOYEN' : 'OK';
+
+    entry.scanData = {
+      clientId: entry.clientId, scopeId: entry.scopeId,
+      companyName: entry.company, domain: entry.domain,
+      assets, findings: ghF, breaches: breachF, dnsFindings: dnsF, intel,
+    };
+    entry.status = 'done';
+    doneCount++;
+    argusBulkUpdateRow(i, entry);
+  }));
+
+  document.getElementById('argus-bulk-progress-bar').style.width = '100%';
+  document.querySelector('#bulk-stat-done .stat-val').textContent = doneCount;
+  document.querySelector('#bulk-stat-error .stat-val').textContent = errorCount;
+  document.querySelector('#bulk-stat-running .stat-val').textContent = '0';
+  document.querySelector('#bulk-stat-findings .stat-val').textContent = totalFindings;
+
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  const mm = Math.floor(elapsed / 60), ss = elapsed % 60;
+  argusBulkUpdateStatus(`✓ Terminé en ${mm}min${ss}s — ${doneCount}/${argusBulkEntries.length} réussis`);
+
+  argusBulkRunning = false;
+  btn.textContent = '▶ Relancer';
+  btn.disabled = false;
+  if (doneCount > 0) document.getElementById('argus-bulk-export-btn').style.display = 'inline-block';
+}
+
+// ── Export Excel multi-onglets (un onglet "Synthèse" + un onglet par société) ──
+function argusBulkExportAll() {
+  const done = argusBulkEntries.filter(e => e.status === 'done' && e.scanData);
+  if (done.length === 0) { showToast('⚠ Aucun scan terminé.'); return; }
+
+  const wb = XLSX.utils.book_new();
+
+  // === Onglet Synthèse ===
+  const synthData = [
+    ['SORE SECURITY — Rapport Multi-Prospects'],
+    ['Date', new Date().toLocaleDateString('fr-FR')],
+    ['Sociétés scannées', done.length],
+    ['Reconnaissance', 'Passive (OSINT) — Aucun système sollicité activement'],
+    [],
+    ['#', 'Société', 'Domaine', 'Score Global', 'Findings Totaux', 'Actifs Découverts',
+     'Credentials Exposés', 'Findings DNS', 'Email SPF', 'Email DMARC', 'Email DKIM',
+     'FTP Détecté', 'Staging Exposé', 'Stealer Logs', 'Takeover Potentiel'],
+  ];
+  done.forEach((e, i) => {
+    const d = e.scanData;
+    const assets = d.assets || [];
+    const ghF = (d.findings || []).filter(f => f.status !== 'false_positive');
+    const dnsF = d.dnsFindings || [];
+    const breachF = d.breaches || [];
+    const email = d.intel?.emailSecurity || {};
+
+    const hasFTP = assets.some(a => /^ftp\./i.test(a.asset_value));
+    const hasStaging = assets.some(a => /\b(staging|preprod|dev|uat)\b/i.test(a.asset_value));
+    const stealerCount = dnsF.filter(f => f.finding_type === 'stealer_log').length;
+    const takeoverCount = dnsF.filter(f => f.finding_type === 'subdomain_takeover').length;
+    const totalFindings = ghF.length + breachF.length + dnsF.length;
+
+    synthData.push([
+      i + 1, e.company, e.domain, e.score, totalFindings, assets.length, ghF.length, dnsF.length,
+      email.hasSPF ? 'OK (' + (email.spfPolicy || '—') + ')' : 'ABSENT',
+      email.hasDMARC ? 'OK (' + (email.dmarcPolicy || '—') + ')' : 'ABSENT',
+      email.hasDKIM ? 'OK' : 'ABSENT',
+      hasFTP ? 'OUI' : 'NON', hasStaging ? 'OUI' : 'NON',
+      stealerCount > 0 ? stealerCount + ' compte(s)' : 'NON',
+      takeoverCount > 0 ? takeoverCount + ' sous-domaine(s)' : 'NON',
+    ]);
+  });
+  const wsSynth = XLSX.utils.aoa_to_sheet(synthData);
+  wsSynth['!cols'] = [{wch:4},{wch:20},{wch:20},{wch:12},{wch:10},{wch:10},{wch:12},{wch:10},{wch:18},{wch:18},{wch:12},{wch:10},{wch:14},{wch:14},{wch:16}];
+  XLSX.utils.book_append_sheet(wb, wsSynth, 'Synthèse');
+
+  // === Un onglet par société ===
+  done.forEach(e => {
+    const d = e.scanData;
+    const ghFindings = d.findings || [];
+    const breaches = d.breaches || [];
+    const dnsFindings = d.dnsFindings || [];
+    const email = d.intel?.emailSecurity || {};
+    const rows = [];
+
+    rows.push([e.company + ' — ' + e.domain]);
+    rows.push(['Score global', e.score]);
+    rows.push(['Date scan', new Date().toLocaleDateString('fr-FR')]);
+    rows.push(['Findings totaux', ghFindings.length + breaches.length + dnsFindings.length]);
+    rows.push([]);
+
+    // Surface d'attaque — argusGroupAssetsByValue (même helper que le rapport
+    // écran/PDF) : un asset_value peut porter plusieurs asset_kind (subdomain/
+    // certificate/service), les champs réels (IPs/TLS/headers/risque) vivent
+    // dans `a.details`, jamais `a.risk_level`/`a.details.resolvedIps` en vrac
+    // par kind (aucune colonne top-level risk_level sur external_assets).
+    rows.push(["SURFACE D'ATTAQUE"]);
+    rows.push(['Actif', 'Type', 'IPs', 'Émetteur TLS', 'Jours TLS', 'Headers exposés', 'Risque']);
+    argusGroupAssetsByValue(d.assets || [], []).forEach(g => {
+      rows.push([
+        g.assetValue,
+        g.assetValue === e.domain ? 'Domaine racine' : 'Sous-domaine',
+        g.ips.length ? g.ips.join(', ') : 'Non résolu',
+        g.tls?.issuer || '—',
+        g.tls?.daysUntilExpiry ?? '—',
+        (g.headers && Object.keys(g.headers).length) ? Object.entries(g.headers).map(([k, v]) => `${k}: ${v}`).join(', ') : 'aucun',
+        g.riskLevel || '—',
+      ]);
+    });
+    rows.push([]);
+
+    rows.push(['SÉCURITÉ EMAIL']);
+    rows.push(['Protocole', 'Présent', 'Politique', 'Risque']);
+    rows.push(['SPF', email.hasSPF ? 'OUI' : 'NON', email.spfPolicy || '—', email.spfRisk || '—']);
+    rows.push(['DKIM', email.hasDKIM ? 'OUI' : 'NON', email.dkimSelector || '—', email.hasDKIM ? 'OK' : 'MOYEN']);
+    rows.push(['DMARC', email.hasDMARC ? 'OUI' : 'NON', email.dmarcPolicy || '—', email.dmarcRisk || '—']);
+    rows.push([]);
+
+    if (ghFindings.length > 0) {
+      rows.push(['CREDENTIALS EXPOSÉS (CODE PUBLIC)']);
+      rows.push(['Repo', 'Fichier', 'Type', 'Source', 'Confiance', 'Statut']);
+      ghFindings.forEach(f => {
+        // matched_snippet délibérément exclu — jamais dans l'export.
+        rows.push([f.repo_url, f.file_path, f.finding_type, f.source, f.confidence, f.status]);
+      });
+      rows.push([]);
+    }
+
+    const shodanF = breaches.filter(b => b.source === 'shodan');
+    if (shodanF.length > 0) {
+      rows.push(['SERVICES EXPOSÉS (SHODAN)']);
+      rows.push(['IP', 'Port', 'Service', 'Sévérité']);
+      shodanF.forEach(f => rows.push([f.ip, f.port, f.service_banner || '—', f.severity]));
+      rows.push([]);
+    }
+
+    if (dnsFindings.length > 0) {
+      rows.push(['FINDINGS DNS & OSINT AVANCÉ']);
+      rows.push(['Type', 'Actif', 'Sévérité', 'Détails', 'Statut']);
+      dnsFindings.forEach(f => {
+        const details = (f.details && typeof f.details === 'object')
+          ? (f.details.note || JSON.stringify(f.details).substring(0, 100)) : '—';
+        rows.push([f.finding_type, f.asset_value, f.severity, details, f.status]);
+      });
+      rows.push([]);
+    }
+
+    const hibpF = breaches.filter(b => b.source === 'hibp');
+    if (hibpF.length > 0) {
+      rows.push(['FUITES DE DONNÉES (HIBP)']);
+      rows.push(['Breach', 'Date', 'Comptes affectés', 'Données exposées', 'Sévérité']);
+      hibpF.forEach(f => rows.push([f.breach_name, f.breach_date, f.breach_count, (f.data_classes || []).join(', '), f.severity]));
+      rows.push([]);
+    }
+
+    rows.push(['RECOMMANDATIONS PRIORITAIRES']);
+    rows.push(['Priorité', 'Recommandation', 'Actif concerné', 'Délai']);
+
+    // ghFindings ne porte pas `.severity` (seulement `.confidence`, voir plus
+    // haut) — converti ici en sévérité synthétique avant fusion, sinon les
+    // credentials exposés (confidence='high') disparaîtraient silencieusement
+    // des recommandations (aucun ghFinding n'aurait jamais severity==='critical').
+    const ghAsFindings = ghFindings.map(f => ({
+      ...f,
+      severity: f.confidence === 'high' ? 'critical' : f.confidence === 'medium' ? 'high' : 'medium',
+      asset_value: `${f.repo_url} — ${f.file_path}`,
+    }));
+    const allFindings = [...ghAsFindings, ...breaches, ...dnsFindings];
+    allFindings.filter(f => f.severity === 'critical').forEach(f => {
+      rows.push(['CRITIQUE', 'Finding critique : ' + f.finding_type, f.asset_value || f.ip || f.breach_name || '—', 'Immédiat']);
+    });
+    allFindings.filter(f => f.severity === 'high').forEach(f => {
+      rows.push(['ÉLEVÉ', 'Finding élevé : ' + f.finding_type, f.asset_value || f.ip || f.breach_name || '—', '< 30 jours']);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{wch:30},{wch:30},{wch:20},{wch:20},{wch:15},{wch:15},{wch:10}];
+
+    // Nom de feuille Excel : max 31 caractères, certains caractères interdits.
+    const sheetName = e.company.replace(/[\\/?*[\]:]/g, '').substring(0, 28).trim() || e.domain.substring(0, 28);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  });
+
+  const dateStr = new Date().toISOString().substring(0, 10);
+  XLSX.writeFile(wb, 'SoreSecurity-EASM-' + dateStr + '.xlsx');
 }
 
 // Regroupe les external_assets (subdomain/certificate/service, une ligne par
