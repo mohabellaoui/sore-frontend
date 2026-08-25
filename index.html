@@ -4805,6 +4805,7 @@ function argusStatusBadge(level, text) {
     warn: 'background:var(--amber-dim);border:1px solid rgba(255,170,0,.3);color:var(--amber)',
     bad: 'background:var(--red-dim);border:1px solid rgba(255,45,85,.3);color:var(--red)',
     neutral: 'background:rgba(100,100,100,.15);border:1px solid rgba(100,100,100,.3);color:var(--text-dim)',
+    info: 'background:rgba(0,102,204,.15);border:1px solid rgba(0,102,204,.3);color:#0066cc',
   };
   return `<span style="${styles[level] || styles.neutral};padding:5px 10px;border-radius:2px;font-family:var(--font-mono);font-size:10px;display:inline-block">${escHtml(text)}</span>`;
 }
@@ -5027,7 +5028,7 @@ async function argusScanStart() {
     {
       const elapsed = Math.floor((Date.now() - argusScanStartTime) / 1000);
       const assetCount = argusLastScanData?.assets?.length || 0;
-      const findingCount = argusCountFindings(argusLastScanData || {});
+      const findingCount = argusCountFindings(argusLastScanData || {}).total;
       argusShowScanSummary(assetCount, findingCount, elapsed);
     }
     loadArgusScope(); loadArgusAssets(); loadArgusExposures(); loadArgusSummary();
@@ -5210,17 +5211,22 @@ function argusComputeSubdomainRiskClientSide(assetValue, hasRealIP) {
   return 'low';
 }
 
-// Risque affiché colonne "Risque" de la Section 3 — un CVE confirmé prime
-// toujours sur riskLevel (nommage/DNS), lui-même toujours lu depuis le
-// backend (computeSubdomainRisk), jamais recalculé à partir du nom ici.
+// Risque affiché colonne "Risque" de la Section 3 — le pire des trois
+// signaux (riskLevel nommage/DNS, tlsRisk expiration certificat, CVE
+// confirmé), tous calculés côté backend (computeSubdomainRisk/
+// computeTlsRisk), jamais recalculés à partir du nom ou d'un seuil de jours
+// ici. `tlsRisk` remplace l'ancien booléen `expiringSoon` (retiré côté
+// backend, seuil unique 30j sans granularité).
+const ARGUS_RISK_RANK = { critical: 4, high: 3, medium: 2, low: 1, info: 0, ok: 0, unknown: 0 };
 function argusAssetRiskLevel(g) {
+  let level = g.riskLevel || 'low';
+  if (g.tls?.tlsRisk && ARGUS_RISK_RANK[g.tls.tlsRisk] > ARGUS_RISK_RANK[level]) level = g.tls.tlsRisk;
   if (g.cves?.length) {
     const maxCvss = Math.max(...g.cves.map(c => Number(c.cvss_score) || 0));
-    if (maxCvss >= 9) return 'critical';
-    if (maxCvss >= 7) return 'high';
-    if (maxCvss >= 4) return 'medium';
+    const cveLevel = maxCvss >= 9 ? 'critical' : maxCvss >= 7 ? 'high' : maxCvss >= 4 ? 'medium' : 'low';
+    if (ARGUS_RISK_RANK[cveLevel] > ARGUS_RISK_RANK[level]) level = cveLevel;
   }
-  return g.riskLevel || 'low';
+  return (level === 'ok' || level === 'info' || level === 'unknown') ? 'low' : level;
 }
 function argusRiskBadgeScreen(level) {
   if (level === 'critical') return argusStatusBadge('bad', 'CRITIQUE');
@@ -5252,41 +5258,75 @@ function argusAssetSourceBadgePdf(source) {
   return '<span class="badge-gray">DNS</span>';
 }
 
+// CORRECTION 5 — un header 'server' identifiant un CDN/proxy de bordure
+// connu (cloudflare/cloudfront/akamai/awselb) n'est pas la même exposition
+// qu'un vrai serveur applicatif versionné (nginx/Apache/IIS) : le premier
+// est une bonne pratique de fingerprinting sur un proxy, le second révèle
+// la stack réelle du serveur d'origine. Liste alignée sur CDN_PROVIDERS
+// (src/agents/argus.js) pour les valeurs 'server' qu'il identifie déjà.
+const ARGUS_CDN_SERVER_VALUES = ['cloudflare', 'cloudfront', 'akamaighost', 'awselb'];
+function argusHeadersIndicateCDN(headers) {
+  const server = String(headers?.server || '').toLowerCase();
+  return ARGUS_CDN_SERVER_VALUES.some(v => server.includes(v));
+}
+
 /**
  * Compte les findings de sécurité réels (pas seulement github_leak_findings)
- * pour que "0 finding" ne puisse jamais coexister avec un score CRITIQUE en
- * Section 6/résumé — CORRECTION 4. `a.details?.riskLevel`, pas `a.risk_level`
- * (aucune colonne top-level `risk_level` sur external_assets, vérifié dans
- * migrate.js avant d'écrire cette fonction — le risque vit dans details,
- * comme tout le reste de ce module, voir computeSubdomainRisk côté backend).
+ * pour que "0 finding" ne puisse jamais coexister avec un score CRITIQUE —
+ * CORRECTION 6. Retourne un détail par priorité `{ total, critique, eleve,
+ * moyen, info }`, pas un simple nombre (précédente version de cette
+ * fonction) : chaque item est classé au même niveau canonique que les
+ * recommandations Section 5 (argusRecoCanonicalLevel), pas une source
+ * séparée qui pourrait diverger. Ne recrée PAS un `argusGenerateRecommendations(scanData)`
+ * complet (n'existe pas — les recos écran/PDF sont construites inline avec
+ * des variables locales à chaque fonction de rendu, `rows`/`emailSecPdf`/...,
+ * pas depuis `scanData` seul) : compte directement les mêmes signaux
+ * (findings/breaches/riskLevel/tlsRisk/overallRisk/vtSubdomains) déjà
+ * utilisés pour générer ces recommandations, sans dupliquer leur texte.
+ * `a.details?.riskLevel`/`a.details?.tlsRisk` — pas `a.risk_level` (aucune
+ * colonne top-level `risk_level` sur external_assets, vérifié dans
+ * migrate.js — le risque vit dans details, voir computeSubdomainRisk/
+ * computeTlsRisk côté backend). Seuls critical/high/medium comptent comme
+ * findings réels — low/info/ok sont de l'inventaire normal, jamais une
+ * recommandation n'est générée pour ces niveaux (voir argusBuildEnvironmentRecos).
  */
 function argusCountFindings(scanData) {
-  let count = 0;
+  const items = [];
 
-  count += (scanData.findings || []).filter(f => f.status !== 'false_positive').length;
+  (scanData.findings || []).filter(f => f.status !== 'false_positive').forEach(f => {
+    items.push(f.confidence === 'high' ? 'critical' : f.confidence === 'medium' ? 'high' : 'medium');
+  });
 
-  count += (scanData.breaches || []).filter(b =>
-    b.source === 'shodan' && b.status !== 'false_positive'
-  ).length;
+  (scanData.breaches || []).filter(b => b.source === 'shodan' && b.status !== 'false_positive').forEach(b => {
+    items.push(b.severity === 'critical' ? 'critical' : b.severity === 'high' ? 'high' : b.severity === 'low' ? 'info' : 'medium');
+  });
 
-  count += (scanData.breaches || []).filter(b =>
-    b.source === 'hibp' && b.status !== 'false_positive'
-  ).length;
+  (scanData.breaches || []).filter(b => b.source === 'hibp' && b.status !== 'false_positive').forEach(b => {
+    items.push((b.data_classes || []).includes('Passwords') ? 'critical' : 'high');
+  });
 
-  count += (scanData.assets || []).filter(a =>
-    ['critical', 'high'].includes(a.details?.riskLevel)
-  ).length;
+  (scanData.assets || []).filter(a => a.asset_kind === 'subdomain' && ['critical', 'high', 'medium'].includes(a.details?.riskLevel)).forEach(a => {
+    items.push(a.details.riskLevel);
+  });
+
+  (scanData.assets || []).filter(a => a.asset_kind === 'certificate' && ['critical', 'medium'].includes(a.details?.tlsRisk)).forEach(a => {
+    items.push(a.details.tlsRisk);
+  });
 
   const email = scanData.intel?.emailSecurity;
-  if (email?.overallRisk === 'critical') count++;
-  if (email?.hasDKIM === false && email?.dmarcPolicy !== 'reject') count++;
+  if (email?.overallRisk && ['critical', 'high', 'medium'].includes(email.overallRisk)) items.push(email.overallRisk);
 
   const vtNew = (scanData.intel?.virusTotal?.vtSubdomains || []).filter(sub =>
     !(scanData.assets || []).some(a => a.asset_value === sub)
   );
-  if (vtNew.length > 0) count++;
+  if (vtNew.length > 0) items.push('high');
 
-  return count;
+  const canonical = items.map(argusRecoCanonicalLevel);
+  const critique = canonical.filter(l => l === 'critical').length;
+  const eleve = canonical.filter(l => l === 'high').length;
+  const moyen = canonical.filter(l => l === 'medium').length;
+  const info = canonical.filter(l => l === 'info').length;
+  return { total: critique + eleve + moyen + info, critique, eleve, moyen, info };
 }
 
 /**
@@ -5342,6 +5382,7 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
   // fonctionnalité) — nécessaire à argusGeneratePentestProposal ci-dessous
   // pour POST /api/argus/pentest-proposal, qui exige clientId dans le body.
   argusLastScanData = { companyName, domain, scopeId, clientId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets, intel, breaches };
+  const argusFindingCountsScreen = argusCountFindings(argusLastScanData); // Conclusion écran — voir sa définition, jamais 0 quand un score CRITIQUE existe
   const rows = argusGroupAssetsByValue(assets, exposures);
   const hibpBreaches = breaches.filter(b => b.source === 'hibp');
   const shodanFindings = argusDedupeShodanFindings(breaches.filter(b => b.source === 'shodan'));
@@ -5366,7 +5407,11 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
     const riskLevel = argusAssetRiskLevel(g);
     const rowStyle = riskLevel === 'critical' ? 'background:rgba(255,45,85,.06)' : riskLevel === 'high' ? 'background:rgba(255,45,85,.03)' : hasHeaders ? 'background:rgba(255,170,0,.05)' : '';
     const tlsCell = g.tls
-      ? (g.tls.expiringSoon ? `<span style="color:var(--amber)">⚠ expire dans ${g.tls.daysUntilExpiry}j</span>` : `<span style="color:var(--green)">✓ valide</span>`)
+      ? (g.tls.tlsRisk === 'critical' || g.tls.tlsRisk === 'medium'
+          ? `<span style="color:${g.tls.tlsRisk === 'critical' ? 'var(--red)' : 'var(--amber)'}">⚠ expire dans ${g.tls.daysUntilExpiry}j</span>`
+          : g.tls.tlsRisk === 'info'
+            ? `<span style="color:var(--cyan)">expire dans ${g.tls.daysUntilExpiry}j</span>`
+            : `<span style="color:var(--green)">✓ valide</span>`)
       : '<span style="color:var(--text-dim)">—</span>';
     const headersCell = hasHeaders
       ? escHtml(Object.entries(g.headers).map(([k, v]) => `${k}: ${v}`).join(', '))
@@ -5482,7 +5527,7 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
             : dkimRiskLevel === 'high' ? argusStatusBadge('warn', '✗ DKIM absent — ÉLEVÉ')
             : argusStatusBadge('warn', '✗ DKIM absent — MOYEN')}
           ${emailSec.dmarcPolicy === 'reject' ? argusStatusBadge('ok', '✓ DMARC reject')
-            : emailSec.dmarcPolicy === 'quarantine' ? argusStatusBadge('warn', '⚠ DMARC quarantine')
+            : emailSec.dmarcPolicy === 'quarantine' ? argusStatusBadge('info', 'ℹ DMARC quarantine')
             : argusStatusBadge('bad', '✗ DMARC absent ou p=none')}
         </div>
         ${emailSec.overallRisk === 'critical'
@@ -5655,6 +5700,18 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
       ? `<div class="table-wrap"><table class="data-table">
           <thead><tr><th>IP</th><th>Port</th><th>Service</th><th>Version</th><th>Sévérité</th></tr></thead>
           <tbody>${shodanFindings.map(f => {
+            // finding_type='cdn_standard_ports' (CORRECTION 2) — severity
+            // stockée 'low' (pas 'info' : absent de la contrainte CHECK
+            // argus_breach_findings.severity côté backend, voir checkShodan)
+            // mais affiché distinctement en INFO/bleu ici, jamais confondu
+            // avec un vrai finding 'medium' via la coloration par défaut.
+            if (f.finding_type === 'cdn_standard_ports') {
+              return `<tr>
+                <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-bright)">${escHtml(f.ip)}</td>
+                <td colspan="3" style="font-size:11px;color:var(--text-dim)">${escHtml(f.service_banner)}</td>
+                <td>${argusStatusBadge('info', 'INFO')}</td>
+              </tr>`;
+            }
             const isCritical = ARGUS_SHODAN_CRITICAL_PORTS.includes(Number(f.port));
             const bannerParts = (f.service_banner || '').split(' ').filter(Boolean);
             return `<tr style="${isCritical ? 'background:rgba(255,45,85,.06)' : ''}">
@@ -5675,7 +5732,13 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
   exposures.filter(e => e.status === 'open' && Number(e.cvss_score) >= 9).forEach(e => recos.push({ level: 'critical', text: `CVE critique ${e.cve_id} (CVSS ${e.cvss_score}) sur ${e.detected_service || 'service inconnu'} — patcher en priorité.`, asset: e.detected_service || 'service inconnu', delay: 'Immédiat' }));
   openFindings.filter(f => f.confidence === 'medium').forEach(f => recos.push({ level: 'high', text: `Secret potentiellement exposé (${f.finding_type}) dans ${f.repo_url} — vérifier et faire tourner si confirmé.`, asset: `${f.repo_url} — ${f.file_path}`, delay: '< 30 jours' }));
   exposures.filter(e => e.status === 'open' && Number(e.cvss_score) >= 7 && Number(e.cvss_score) < 9).forEach(e => recos.push({ level: 'high', text: `CVE élevée ${e.cve_id} (CVSS ${e.cvss_score}) — planifier le correctif.`, asset: e.detected_service || 'service inconnu', delay: '< 30 jours' }));
-  rows.filter(g => g.tls?.expiringSoon).forEach(g => recos.push({ level: 'medium', text: `Certificat TLS de ${g.assetValue} expire dans ${g.tls.daysUntilExpiry} jour(s) — renouveler.`, asset: g.assetValue, delay: '< 30 jours' }));
+  // CORRECTION 4 — matrice TLS révisée (30-59j = ok, jamais un risque en soi
+  // : Let's Encrypt/Google Trust Services renouvellent automatiquement dès
+  // J-30 dans l'immense majorité des cas). tlsRisk toujours lu depuis le
+  // backend (computeTlsRisk), jamais un seuil de jours recalculé ici.
+  rows.filter(g => g.tls?.tlsRisk === 'critical').forEach(g => recos.push({ level: 'critical', text: `Certificat TLS de ${g.assetValue} expire dans ${g.tls.daysUntilExpiry} jour(s) — renouvellement urgent.`, asset: g.assetValue, delay: 'Immédiat' }));
+  rows.filter(g => g.tls?.tlsRisk === 'medium').forEach(g => recos.push({ level: 'medium', text: `Certificat TLS de ${g.assetValue} expire dans ${g.tls.daysUntilExpiry} jour(s) — renouveler.`, asset: g.assetValue, delay: '< 15 jours' }));
+  rows.filter(g => g.tls?.tlsRisk === 'info').forEach(g => recos.push({ level: 'info', text: `Certificat TLS de ${g.assetValue} expire dans ${g.tls.daysUntilExpiry} jour(s) — renouvellement imminent, vérifier l'automatisation (Let's Encrypt/Google Trust Services renouvellent automatiquement dès J-30).`, asset: g.assetValue, delay: '< 90 jours' }));
   exposures.filter(e => e.status === 'open' && Number(e.cvss_score) >= 4 && Number(e.cvss_score) < 7).forEach(e => recos.push({ level: 'medium', text: `CVE modérée ${e.cve_id} (CVSS ${e.cvss_score}).`, asset: e.detected_service || 'service inconnu', delay: '< 90 jours' }));
 
   // AMÉLIORATION — sous-domaines VirusTotal nouveaux (absents du scan initial), voir newVtSubdomains ci-dessus.
@@ -5688,8 +5751,19 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
   // pratique INFO, DMARC quarantine devient une recommandation d'évolution
   // INFO plutôt qu'une absence totale de suivi.
   recos.push(...argusBuildEnvironmentRecos({ assets, rows }));
-  if (rows.some(g => g.headers && Object.keys(g.headers).length > 0)) {
-    recos.push({ level: 'info', text: 'Masquage des headers de fingerprinting (Bonne pratique — niveau INFO)', asset: `${rows.filter(g => g.headers && Object.keys(g.headers).length > 0).length} actif(s)`, delay: '< 90 jours' });
+  // CORRECTION 5 — CDN identifié (server: cloudflare/awselb/...) = bonne
+  // pratique INFO ; vrai serveur applicatif révélé (nginx/Apache/IIS...) =
+  // MOYEN, pas la même exposition (voir argusHeadersIndicateCDN).
+  {
+    const headerRows = rows.filter(g => g.headers && Object.keys(g.headers).length > 0);
+    const cdnHeaderRows = headerRows.filter(g => argusHeadersIndicateCDN(g.headers));
+    const appHeaderRows = headerRows.filter(g => !argusHeadersIndicateCDN(g.headers));
+    if (cdnHeaderRows.length) {
+      recos.push({ level: 'info', text: 'Masquage des headers de fingerprinting sur proxy CDN (Bonne pratique — niveau INFO)', asset: `${cdnHeaderRows.length} actif(s)`, delay: '< 90 jours' });
+    }
+    if (appHeaderRows.length) {
+      recos.push({ level: 'medium', text: 'Masquage des headers de fingerprinting — serveur applicatif révélé', asset: `${appHeaderRows.length} actif(s)`, delay: '< 30 jours' });
+    }
   }
   if (emailSec?.dmarcRisk === 'low') {
     recos.push({ level: 'info', text: 'DMARC quarantine en place — évolution vers reject recommandée', asset: domain, delay: '< 90 jours' });
@@ -5719,6 +5793,7 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
     bannerEl.innerHTML = '';
   }
   document.getElementById('argus-report-content').innerHTML = `
+    <div class="argus-report-note" style="background:var(--amber-dim);border:1px solid rgba(255,170,0,.3);color:var(--amber);padding:10px;margin-bottom:16px;font-style:normal">Ce rapport est établi par reconnaissance passive (OSINT) uniquement. Aucun système n'a été sollicité activement. Les niveaux de risque indiqués sont des estimations basées sur des données publiques — une confirmation par test d'intrusion actif (pentest) est requise pour valider l'exploitabilité réelle.</div>
     <div class="argus-report-section">
       <h4>Surface d'attaque — actifs découverts</h4>
       <div class="table-wrap"><table class="data-table">
@@ -5766,6 +5841,11 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
         </div>`).join('')
         : `<div class="argus-clean-badge">✓ Aucune action corrective urgente identifiée à ce stade.</div>`}
     </div>
+    <div class="argus-report-section">
+      <h4>Conclusion</h4>
+      <p style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim)">Cette évaluation révèle ${escHtml(assets.length)} actif(s) exposé(s) et ${argusFindingCountsScreen.total} finding(s) de sécurité : ${argusFindingCountsScreen.critique} critique(s), ${argusFindingCountsScreen.eleve} élevé(s), ${argusFindingCountsScreen.moyen} moyen(s), ${argusFindingCountsScreen.info} informatif(s).</p>
+      <p style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);font-style:italic">Les findings qualifiés "à confirmer" nécessitent un scan actif pour valider l'exposition réelle. Sore Security propose un audit intrusif ciblé sur les vecteurs prioritaires identifiés ci-dessus.</p>
+    </div>
   `;
   // `.style.display = ''` retombe sur la règle CSS `.argus-report{display:none}`
   // (classe, pas style inline) — l'élément reste donc caché malgré le contenu
@@ -5808,7 +5888,10 @@ async function argusGenerateExecutiveSummary(scanData) {
   const subdomains = [...new Set(assets.filter(a => a.asset_kind === 'subdomain').map(a => a.asset_value))];
   const criticalPoints = [];
   if (findings.some(f => f.confidence === 'high')) criticalPoints.push('credentials à haute confiance exposés publiquement');
-  if (assets.some(a => a.asset_kind === 'certificate' && a.details?.expiringSoon)) criticalPoints.push('certificat(s) TLS proche(s) de l\'expiration');
+  // tlsRisk (computeTlsRisk, backend) remplace l'ancien booléen expiringSoon
+  // (retiré côté backend, seuil unique 30j) — seuls medium/critical (<15j)
+  // justifient un point critique dans le résumé exécutif, pas 30-59j (ok).
+  if (assets.some(a => a.asset_kind === 'certificate' && ['medium', 'critical'].includes(a.details?.tlsRisk))) criticalPoints.push('certificat(s) TLS proche(s) de l\'expiration');
   // riskLevel (computeSubdomainRisk, backend) plutôt qu'un nom seul ('ftp.'/
   // 'staging.') : un nom DNS sans IP résolue ni confirmation Shodan ne
   // justifie pas d'affirmer un service "actif" dans un résumé exécutif généré
@@ -5864,16 +5947,19 @@ function argusPdfRiskBadge(level) {
   return '<span class="badge-green">OK</span>';
 }
 
-function argusPdfTlsStatusBadge(days) {
-  if (days == null) return '<span class="badge-green">OK</span>';
-  if (days < 30) return '<span class="badge-red">CRITIQUE</span>';
-  if (days < 60) return '<span class="badge-orange">À SURVEILLER</span>';
+// CORRECTION 4 — matrice révisée, lit tlsRisk (computeTlsRisk, backend),
+// jamais un seuil de jours recalculé ici (30-59j = OK, pas un risque).
+function argusPdfTlsStatusBadge(tlsRisk) {
+  if (tlsRisk === 'critical') return '<span class="badge-red">CRITIQUE</span>';
+  if (tlsRisk === 'medium') return '<span class="badge-yellow">MOYEN</span>';
+  if (tlsRisk === 'info') return '<span class="badge-blue">À SURVEILLER</span>';
   return '<span class="badge-green">OK</span>';
 }
 
 /** Construit le document HTML complet de la fenêtre imprimable — indépendant du DOM affiché à l'écran. */
 function argusBuildPdfReportHtml(scanData, summaryText) {
   const { companyName, domain, assets, exposures, findings, clientStatus, intel, breaches = [] } = scanData;
+  const argusFindingCounts = argusCountFindings(scanData); // Section 6 — voir sa définition, jamais 0 quand un score CRITIQUE existe
   const hibpBreaches = breaches.filter(b => b.source === 'hibp');
   const shodanFindings = argusDedupeShodanFindings(breaches.filter(b => b.source === 'shodan'));
   const rows = argusGroupAssetsByValue(assets, exposures);
@@ -5898,8 +5984,7 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
   const allRowsPdf = [...rows, ...vtOnlyRowsPdf];
   const surfaceRows = allRowsPdf.length ? allRowsPdf.map(g => {
     const hasHeaders = g.headers && Object.keys(g.headers).length > 0;
-    const tlsExpiringUnder60 = g.tls?.daysUntilExpiry != null && g.tls.daysUntilExpiry < 60;
-    const assetRisk = tlsExpiringUnder60 ? 'critical' : argusAssetRiskLevel(g);
+    const assetRisk = argusAssetRiskLevel(g); // inclut déjà tlsRisk, voir sa définition
     const rowClass = assetRisk === 'critical' ? 'critical' : assetRisk === 'high' ? 'high' : '';
     const tlsCell = g.tls
       ? `${escHtml(g.tls.issuer || '—')} · expire dans ${g.tls.daysUntilExpiry ?? '?'} j.`
@@ -5923,7 +6008,7 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
         <td>${escHtml(g.tls.issuer || '—')}</td>
         <td>${g.tls.daysUntilExpiry != null ? escHtml(new Date(Date.now() + g.tls.daysUntilExpiry * 86400000).toLocaleDateString('fr-FR')) : '—'}</td>
         <td>${g.tls.daysUntilExpiry ?? '—'}</td>
-        <td>${argusPdfTlsStatusBadge(g.tls.daysUntilExpiry)}</td>
+        <td>${argusPdfTlsStatusBadge(g.tls.tlsRisk)}</td>
       </tr>`).join('')
     : `<tr><td colspan="5">Aucun certificat TLS analysé.</td></tr>`;
 
@@ -6010,6 +6095,13 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
       ? `<table>
           <thead><tr><th>IP</th><th>Port</th><th>Service</th><th>Version</th><th>Sévérité</th></tr></thead>
           <tbody>${shodanFindings.map(f => {
+            // finding_type='cdn_standard_ports' (CORRECTION 2) — severity
+            // stockée 'low' (contrainte CHECK côté backend, voir checkShodan)
+            // mais affiché distinctement en INFO/bleu, jamais confondu avec
+            // un vrai finding via la coloration par défaut.
+            if (f.finding_type === 'cdn_standard_ports') {
+              return `<tr><td>${escHtml(f.ip)}</td><td colspan="3">${escHtml(f.service_banner)}</td><td><span class="badge-blue">INFO</span></td></tr>`;
+            }
             const bannerParts = (f.service_banner || '').split(' ').filter(Boolean);
             const critical = ARGUS_SHODAN_CRITICAL_PORTS.includes(Number(f.port));
             return `<tr class="${critical ? 'critical' : ''}">
@@ -6049,7 +6141,7 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
             <td>DMARC</td>
             <td>${emailSecPdf.hasDMARC ? '✓' : '✗'}</td>
             <td>${escHtml(emailSecPdf.dmarcPolicy || 'absent')}</td>
-            <td>${emailSecPdf.dmarcRisk === 'ok' ? '<span class="badge-green">OK</span>' : emailSecPdf.dmarcRisk === 'low' ? '<span class="badge-yellow">MOYEN</span>' : emailSecPdf.dmarcRisk === 'high' ? '<span class="badge-orange">ÉLEVÉ</span>' : '<span class="badge-red">CRITIQUE</span>'}</td>
+            <td>${emailSecPdf.dmarcRisk === 'ok' ? '<span class="badge-green">OK</span>' : emailSecPdf.dmarcRisk === 'low' ? '<span class="badge-blue">INFO</span>' : emailSecPdf.dmarcRisk === 'high' ? '<span class="badge-orange">ÉLEVÉ</span>' : '<span class="badge-red">CRITIQUE</span>'}</td>
           </tr>
         </tbody>
       </table>
@@ -6148,18 +6240,34 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
   const openFindings = findings.filter(f => !['false_positive', 'remediated'].includes(f.status));
   openFindings.filter(f => f.confidence === 'high').forEach(f => recos.push({ level: 'critical', text: 'Rotation immédiate des secrets exposés', asset: `${f.repo_url} — ${f.file_path}`, delay: 'Immédiat' }));
   openFindings.filter(f => f.source === 'pastebin').forEach(f => recos.push({ level: 'critical', text: 'Credentials détectés sur Pastebin — rotation immédiate requise', asset: `${f.repo_url}`, delay: 'Immédiat' }));
-  rows.filter(g => g.tls?.daysUntilExpiry != null && g.tls.daysUntilExpiry < 30).forEach(g => recos.push({ level: 'critical', text: 'Renouvellement urgent du certificat TLS', asset: g.assetValue, delay: '< 7 jours' }));
+  // CORRECTION 4 — matrice TLS révisée (30-59j = ok, jamais un risque en soi
+  // : renouvellement automatique Let's Encrypt/Google Trust Services dès
+  // J-30 dans l'immense majorité des cas). tlsRisk toujours lu depuis le
+  // backend (computeTlsRisk), jamais un seuil de jours recalculé ici.
+  rows.filter(g => g.tls?.tlsRisk === 'critical').forEach(g => recos.push({ level: 'critical', text: 'Renouvellement urgent du certificat TLS', asset: g.assetValue, delay: 'Immédiat' }));
+  rows.filter(g => g.tls?.tlsRisk === 'medium').forEach(g => recos.push({ level: 'medium', text: 'Planification renouvellement certificat TLS', asset: g.assetValue, delay: '< 15 jours' }));
+  rows.filter(g => g.tls?.tlsRisk === 'info').forEach(g => recos.push({ level: 'info', text: "Renouvellement imminent — vérifier l'automatisation (Let's Encrypt/Google Trust Services renouvellent dès J-30)", asset: g.assetValue, delay: '< 90 jours' }));
 
   // CORRECTION 2/3 — FTP/environnements hors-prod nuancés (voir
   // argusBuildEnvironmentRecos, remplace les anciennes règles inconditionnelles
   // 'ftp.'→critical / 'staging.'→high-priority) ; headers rétrogradés en
   // bonne pratique INFO plutôt qu'ÉLEVÉ.
   recos.push(...argusBuildEnvironmentRecos({ assets, rows }));
-  if (rows.some(g => g.headers && Object.keys(g.headers).length > 0)) {
-    recos.push({ level: 'info', text: 'Masquage des headers de fingerprinting (Bonne pratique — niveau INFO)', asset: `${rows.filter(g => g.headers && Object.keys(g.headers).length > 0).length} actif(s)`, delay: '< 90 jours' });
+  // CORRECTION 5 — CDN identifié (server: cloudflare/awselb/...) = bonne
+  // pratique INFO ; vrai serveur applicatif révélé (nginx/Apache/IIS...) =
+  // MOYEN, pas la même exposition (voir argusHeadersIndicateCDN).
+  {
+    const headerRows = rows.filter(g => g.headers && Object.keys(g.headers).length > 0);
+    const cdnHeaderRows = headerRows.filter(g => argusHeadersIndicateCDN(g.headers));
+    const appHeaderRows = headerRows.filter(g => !argusHeadersIndicateCDN(g.headers));
+    if (cdnHeaderRows.length) {
+      recos.push({ level: 'info', text: 'Masquage des headers de fingerprinting sur proxy CDN (Bonne pratique — niveau INFO)', asset: `${cdnHeaderRows.length} actif(s)`, delay: '< 90 jours' });
+    }
+    if (appHeaderRows.length) {
+      recos.push({ level: 'medium', text: 'Masquage des headers de fingerprinting — serveur applicatif révélé', asset: `${appHeaderRows.length} actif(s)`, delay: '< 30 jours' });
+    }
   }
   openFindings.filter(f => f.confidence === 'medium').forEach(f => recos.push({ level: 'high-priority', text: 'Audit des repositories et rotation préventive', asset: `${f.repo_url} — ${f.file_path}`, delay: '< 30 jours' }));
-  rows.filter(g => g.tls?.daysUntilExpiry != null && g.tls.daysUntilExpiry >= 30 && g.tls.daysUntilExpiry < 60).forEach(g => recos.push({ level: 'high-priority', text: 'Planification renouvellement certificat TLS', asset: g.assetValue, delay: '< 30 jours' }));
 
   if (subdomains.length > 5) recos.push({ level: 'low', text: 'Inventaire et revue du périmètre exposé', asset: `${subdomains.length} sous-domaines`, delay: '< 60 jours' });
 
@@ -6252,9 +6360,10 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
     <p style="margin:0"><strong>Niveau global : <span style="color:${recoGlobalColor}">${recoGlobalLevel}</span></strong></p>
   </div>`;
 
-  const prospectBanner = clientStatus === 'prospect'
-    ? `<div class="prospect-banner">Ce rapport est établi par reconnaissance passive (OSINT) uniquement. Aucun système n'a été sollicité activement. Les niveaux de risque indiqués sont des estimations basées sur des données publiques — une confirmation par test d'intrusion actif (pentest) est requise pour valider l'exploitabilité réelle.</div>`
-    : '';
+  // CORRECTION 7 — affiché pour TOUS les rapports (prospect ET client), plus
+  // conditionné à clientStatus === 'prospect' : la posture passive-vs-active
+  // s'applique quel que soit le statut du client.
+  const prospectBanner = `<div class="prospect-banner">Ce rapport est établi par reconnaissance passive (OSINT) uniquement. Aucun système n'a été sollicité activement. Les niveaux de risque indiqués sont des estimations basées sur des données publiques — une confirmation par test d'intrusion actif (pentest) est requise pour valider l'exploitabilité réelle.</div>`;
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>Rapport ARGUS — ${escHtml(companyName)}</title>
 <style>
@@ -6335,6 +6444,7 @@ ${prospectBanner}
   <thead><tr><th>Domaine</th><th>Émetteur</th><th>Valide jusqu'au</th><th>Jours restants</th><th>Statut</th></tr></thead>
   <tbody>${tlsRows}</tbody>
 </table>
+<p><em>Let's Encrypt et Google Trust Services renouvellent automatiquement — vérifier que le renouvellement auto est actif pour les certificats signalés "À SURVEILLER" ou "MOYEN".</em></p>
 
 <h2>4. Code & Credential Exposure</h2>
 ${githubSection}
@@ -6356,8 +6466,8 @@ ${recoGroupsHtmlPdf}
 ${recoScoreBoxPdf}
 
 <h2>6. Conclusion</h2>
-<p>Cette évaluation de reconnaissance passive révèle ${assets.length} actif(s) exposé(s) et ${argusCountFindings(scanData)} finding(s) de sécurité. Sore Security recommande la mise en place d'un programme de surveillance continue de la surface d'attaque ainsi qu'un audit approfondi des points identifiés.</p>
-<p><em>Les findings marqués "à confirmer" nécessitent un scan actif pour valider l'exposition réelle avant toute action.</em></p>
+<p>Cette évaluation révèle ${assets.length} actif(s) exposé(s) et ${argusFindingCounts.total} finding(s) de sécurité : ${argusFindingCounts.critique} critique(s), ${argusFindingCounts.eleve} élevé(s), ${argusFindingCounts.moyen} moyen(s), ${argusFindingCounts.info} informatif(s). Sore Security recommande la mise en place d'un programme de surveillance continue de la surface d'attaque ainsi qu'un audit approfondi des points identifiés.</p>
+<p><em>Les findings qualifiés "à confirmer" nécessitent un scan actif pour valider l'exposition réelle. Sore Security propose un audit intrusif ciblé sur les vecteurs prioritaires identifiés ci-dessus.</em></p>
 <p>Pour toute question ou pour approfondir cette évaluation :<br>contact@sore-security.com — sore-security.com</p>
 
 <footer>
