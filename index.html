@@ -4569,6 +4569,12 @@ const ARGUS_PASSIVE_SCAN_MESSAGES = [
   'Réputation URLScan...',
   'Réputation VirusTotal...',
   'Validation BGP/RPKI...',
+  'Analyse résilience CDN...',
+  'Vérification subdomain takeover...',
+  'Test AXFR / DNSSEC...',
+  'Énumération stockage cloud...',
+  'Vérification stealer logs...',
+  'Analyse typosquatting...',
 ];
 
 // === SCAN TIMER ===
@@ -5004,12 +5010,18 @@ async function argusScanStart() {
     // flux. Promise.all suffit ici (pas besoin de allSettled) : argusScanFetch ne
     // rejette jamais, elle renvoie toujours { ok, status, data } même en cas d'échec
     // réseau/timeout — il n'y a donc rien qu'allSettled protégerait de plus.
-    const [findingsRes, summaryRes, exposuresRes, intelRes, breachRes] = await Promise.all([
+    // ÉTAPE 0 (findings DNS) — /argus/findings/dns, ajoutée au même Promise.all
+    // que les autres lectures post-scan (checkOriginIP/checkSubdomainTakeover/
+    // checkDNSSecurity/checkCloudStorage/checkStealerLogs/checkTyposquatting,
+    // backend commit 7993d6d), même garde `ok, false` (échec silencieux) que
+    // /argus/intel et /argus/findings/breaches.
+    const [findingsRes, summaryRes, exposuresRes, intelRes, breachRes, dnsFindingsRes] = await Promise.all([
       argusScanFetch(`/argus/findings/github-leaks?clientId=${client.id}&scopeId=${scopeId}`),
       argusScanFetch(`/argus/summary?clientId=${client.id}`),
       argusScanFetch(`/argus/exposures?clientId=${client.id}`),
       argusScanFetch(`/argus/intel?clientId=${client.id}&scopeId=${scopeId}`, {}, 30000, false),
       argusScanFetch(`/argus/findings/breaches?clientId=${client.id}&scopeId=${scopeId}`, {}, 15000, false),
+      argusScanFetch(`/argus/findings/dns?clientId=${client.id}&scopeId=${scopeId}`, {}, 15000, false),
     ]);
     const findings = findingsRes.data?.data || [];
     const summary = summaryRes.data?.data || null;
@@ -5017,11 +5029,12 @@ async function argusScanStart() {
     const exposures = (exposuresRes.data?.data || []).filter(e => assetIds.has(e.asset_id));
     const intel = intelRes.ok ? intelRes.data?.data || null : null;
     const breaches = breachRes.ok ? breachRes.data?.data || [] : [];
+    const dnsFindings = dnsFindingsRes.ok ? dnsFindingsRes.data?.data || [] : [];
 
     argusScanSetStep('report', 'done');
     argusScanSetStatus(githubWarning ? '⚠ Scan terminé avec avertissement — ' + githubWarning : '✅ Scan terminé.', githubWarning ? 'warning' : null);
 
-    argusRenderScanReport({ companyName: client.name, domain, scopeId, clientId: client.id, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets, intel, breaches });
+    argusRenderScanReport({ companyName: client.name, domain, scopeId, clientId: client.id, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets, intel, breaches, dnsFindings });
     argusUpdateProgress(100, 'Scan terminé ✓');
     argusStopScanTimer();
     argusStopStatusRotation('');
@@ -5271,6 +5284,22 @@ function argusHeadersIndicateCDN(headers) {
 }
 
 /**
+ * Regroupe dnsFindings (argus_dns_findings, backend commit 7993d6d) par
+ * finding_type — partagée entre argusRenderScanReport et
+ * argusGeneratePDFReport, même 6 sections DNS pour les deux. `stealer_log`
+ * n'a jamais qu'UN SEUL finding par domaine (agrégat HudsonRock côté
+ * backend — pas de tableau par employé, l'API communautaire ne fournit
+ * aucune donnée individuelle, voir commentaire détaillé dans argus.js).
+ */
+function argusGroupDnsFindings(dnsFindings) {
+  const byType = { origin_ip_exposed: [], subdomain_takeover: [], axfr_vulnerable: [], dnssec_missing: [], cloud_storage_exposed: [], typosquatting: [], stealer_log: [] };
+  for (const f of (dnsFindings || [])) {
+    if (byType[f.finding_type]) byType[f.finding_type].push(f);
+  }
+  return byType;
+}
+
+/**
  * Compte les findings de sécurité réels (pas seulement github_leak_findings)
  * pour que "0 finding" ne puisse jamais coexister avec un score CRITIQUE —
  * CORRECTION 6. Retourne un détail par priorité `{ total, critique, eleve,
@@ -5315,6 +5344,10 @@ function argusCountFindings(scanData) {
 
   const email = scanData.intel?.emailSecurity;
   if (email?.overallRisk && ['critical', 'high', 'medium'].includes(email.overallRisk)) items.push(email.overallRisk);
+
+  (scanData.dnsFindings || []).filter(f => f.status !== 'false_positive' && ['critical', 'high', 'medium'].includes(f.severity)).forEach(f => {
+    items.push(f.severity);
+  });
 
   const vtNew = (scanData.intel?.virusTotal?.vtSubdomains || []).filter(sub =>
     !(scanData.assets || []).some(a => a.asset_value === sub)
@@ -5377,11 +5410,11 @@ function argusBuildEnvironmentRecos({ assets, rows }) {
 // exigerait de sérialiser tout l'objet dans un attribut HTML).
 let argusLastScanData = null;
 
-function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets = [], intel = null, breaches = [] }) {
+function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets = [], intel = null, breaches = [], dnsFindings = [] }) {
   // clientId ajouté ici (absent du reste des données stockées avant cette
   // fonctionnalité) — nécessaire à argusGeneratePentestProposal ci-dessous
   // pour POST /api/argus/pentest-proposal, qui exige clientId dans le body.
-  argusLastScanData = { companyName, domain, scopeId, clientId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets, intel, breaches };
+  argusLastScanData = { companyName, domain, scopeId, clientId, assets, exposures, findings, summary, clientStatus, githubTimedOutAssets, intel, breaches, dnsFindings };
   const argusFindingCountsScreen = argusCountFindings(argusLastScanData); // Conclusion écran — voir sa définition, jamais 0 quand un score CRITIQUE existe
   const rows = argusGroupAssetsByValue(assets, exposures);
   const hibpBreaches = breaches.filter(b => b.source === 'hibp');
@@ -5726,6 +5759,100 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
       : `<div class="argus-clean-badge">✓ Aucun service sensible exposé détecté</div>`}
   </div>`;
 
+  // ── 6 nouvelles sections DNS (argus_dns_findings, backend commit 7993d6d) ──
+  const dnsByType = argusGroupDnsFindings(dnsFindings);
+
+  const originIpSection = `<div class="argus-report-section">
+    <h4>Résilience CDN & IP d'origine</h4>
+    ${dnsByType.origin_ip_exposed.length
+      ? `<div class="argus-report-note" style="background:var(--amber-dim);border:1px solid rgba(255,170,0,.3);color:var(--amber);padding:10px;margin-bottom:10px;font-style:normal">⚠ IP(s) potentiellement non protégée(s) par le CDN détectée(s). Un attaquant ciblant directement ces IPs contourne le WAF.</div>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>IP candidate</th><th>Source</th><th>Reverse DNS</th><th>Risque</th></tr></thead>
+          <tbody>${dnsByType.origin_ip_exposed.map(f => `<tr>
+            <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-bright)">${escHtml(f.asset_value)}</td>
+            <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(f.details?.source || '—')}</td>
+            <td style="font-family:var(--font-mono);font-size:11px">${escHtml(f.details?.reverseDns || '—')}</td>
+            <td>${argusRiskBadgeScreen(f.severity)}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`
+      : `<div class="argus-clean-badge">✓ Aucune IP d'origine exposée détectée</div>`}
+  </div>`;
+
+  const takeoverSection = `<div class="argus-report-section">
+    <h4>Prise de contrôle de sous-domaines</h4>
+    ${dnsByType.subdomain_takeover.length
+      ? `<div class="argus-report-note" style="background:var(--red-dim);border:1px solid rgba(255,45,85,.3);color:var(--red);padding:10px;margin-bottom:10px;font-style:normal">⚠ CRITIQUE — Ces sous-domaines peuvent être revendiqués par un tiers malveillant.</div>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Sous-domaine</th><th>CNAME</th><th>Service</th><th>Sévérité</th></tr></thead>
+          <tbody>${dnsByType.subdomain_takeover.map(f => `<tr style="background:rgba(255,45,85,.06)">
+            <td style="font-weight:600;color:var(--text-bright)">${escHtml(f.asset_value)}</td>
+            <td style="font-family:var(--font-mono);font-size:11px">${escHtml(f.details?.cname || '—')}</td>
+            <td>${escHtml(f.details?.targetService || '—')}</td>
+            <td>${argusRiskBadgeScreen(f.severity)}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`
+      : `<div class="argus-clean-badge">✓ Aucune prise de contrôle de sous-domaine détectée</div>`}
+  </div>`;
+
+  const axfrFinding = dnsByType.axfr_vulnerable[0] || null;
+  const dnssecFinding = dnsByType.dnssec_missing[0] || null;
+  const dnsSecuritySection = `<div class="argus-report-section">
+    <h4>Sécurité DNS (AXFR / DNSSEC)</h4>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      ${axfrFinding ? argusStatusBadge('bad', `✗ AXFR vulnérable (${escHtml(axfrFinding.details?.nameserver || '')})`) : argusStatusBadge('ok', '✓ AXFR non vulnérable')}
+      ${dnssecFinding ? argusStatusBadge('warn', '⚠ DNSSEC absent') : argusStatusBadge('ok', '✓ DNSSEC actif')}
+    </div>
+    ${axfrFinding ? `<div class="argus-report-note" style="background:var(--red-dim);border:1px solid rgba(255,45,85,.3);color:var(--red);padding:10px;margin-top:10px;font-style:normal">🔴 Transfert de zone non restreint — l'attaquant peut obtenir la table DNS complète de votre infrastructure (${escHtml(axfrFinding.details?.recordCount ?? '?')} enregistrements exposés).</div>` : ''}
+  </div>`;
+
+  const cloudStorageSection = `<div class="argus-report-section">
+    <h4>Stockage Cloud</h4>
+    ${dnsByType.cloud_storage_exposed.length
+      ? `<div class="table-wrap"><table class="data-table">
+          <thead><tr><th>URL</th><th>Provider</th><th>Accessible</th><th>Sévérité</th></tr></thead>
+          <tbody>${dnsByType.cloud_storage_exposed.map(f => `<tr style="${f.severity === 'critical' ? 'background:rgba(255,45,85,.06)' : 'background:rgba(255,170,0,.05)'}">
+            <td style="font-family:var(--font-mono);font-size:11px"><a href="${escHtml(f.details?.url || f.asset_value)}" target="_blank" rel="noopener" style="color:var(--cyan)">${escHtml(f.details?.url || f.asset_value)}</a></td>
+            <td style="text-transform:uppercase;font-size:11px">${escHtml(f.details?.provider || '—')}</td>
+            <td>${f.details?.accessible ? '✗ Publique' : '✓ Privée (existe)'}</td>
+            <td>${argusRiskBadgeScreen(f.severity)}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`
+      : `<div class="argus-clean-badge">✓ Aucun bucket cloud exposé détecté</div>`}
+  </div>`;
+
+  const stealerLogFinding = dnsByType.stealer_log[0] || null;
+  const stealerLogSection = `<div class="argus-report-section">
+    <h4>Stealer Logs (Identifiants compromis)</h4>
+    ${stealerLogFinding
+      ? `<div class="argus-report-note" style="background:var(--red-dim);border:1px solid rgba(255,45,85,.3);color:var(--red);padding:10px;margin-bottom:10px;font-style:normal">⚠ Des identifiants d'employés associés à ce domaine ont été détectés dans des bases de données de malwares de type infostealer.</div>
+        <table class="data-table">
+          <tbody>
+            <tr><td style="font-weight:600;width:220px">Employés touchés</td><td>${escHtml(stealerLogFinding.details?.employeesCompromised ?? '—')}</td></tr>
+            <tr><td style="font-weight:600">Familles malware principales</td><td>${(stealerLogFinding.details?.topMalwareFamilies || []).map(t => argusStatusBadge('neutral', t)).join(' ') || '—'}</td></tr>
+            <tr><td style="font-weight:600">Dernière compromission</td><td>${stealerLogFinding.details?.lastCompromised ? new Date(stealerLogFinding.details.lastCompromised).toLocaleDateString('fr-FR') : '—'}</td></tr>
+            <tr><td style="font-weight:600">Sévérité</td><td>${argusRiskBadgeScreen(stealerLogFinding.severity)}</td></tr>
+          </tbody>
+        </table>
+        <p style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-top:8px">Note : Rotation immédiate des mots de passe + activation MFA recommandées.</p>`
+      : `<div class="argus-clean-badge">✓ Aucun identifiant compromis détecté</div>`}
+  </div>`;
+
+  const typosquattingSection = `<div class="argus-report-section">
+    <h4>Typosquatting</h4>
+    ${dnsByType.typosquatting.length
+      ? `<p style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim);margin-bottom:8px">⚠ Des domaines similaires enregistrés par des tiers ont été détectés :</p>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Domaine</th><th>Type de variation</th><th>Actif</th><th>Risque</th></tr></thead>
+          <tbody>${dnsByType.typosquatting.map(f => `<tr>
+            <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-bright)">${escHtml(f.asset_value)}</td>
+            <td style="font-size:11px;color:var(--text-dim)">${escHtml(f.details?.variationType || '—')}</td>
+            <td>${f.details?.resolves ? '✓ Oui' : '✗ Non'}</td>
+            <td>${argusRiskBadgeScreen(f.severity)}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`
+      : `<div class="argus-clean-badge">✓ Aucun domaine typosquat enregistré détecté</div>`}
+  </div>`;
+
   const recos = [];
   const openFindings = findings.filter(f => !['false_positive', 'remediated'].includes(f.status));
   openFindings.filter(f => f.confidence === 'high').forEach(f => recos.push({ level: 'critical', text: `Secret exposé (${f.finding_type}) dans ${f.repo_url} — ${f.file_path} : faire tourner la valeur immédiatement.`, asset: `${f.repo_url} — ${f.file_path}`, delay: 'Immédiat' }));
@@ -5767,6 +5894,26 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
   }
   if (emailSec?.dmarcRisk === 'low') {
     recos.push({ level: 'info', text: 'DMARC quarantine en place — évolution vers reject recommandée', asset: domain, delay: '< 90 jours' });
+  }
+
+  // Sécurité DNS (argus_dns_findings, PARTIE 4) — sévérité toujours lue
+  // depuis le backend (checkOriginIP/checkSubdomainTakeover/checkDNSSecurity/
+  // checkCloudStorage/checkStealerLogs/checkTyposquatting dans
+  // src/agents/argus.js), jamais recalculée ici — même principe que
+  // Shodan/Google Dorks ci-dessus.
+  const dnsRecoLevel = sev => sev === 'critical' ? 'critical' : sev === 'high' ? 'high' : 'medium';
+  const dnsRecoDelay = sev => sev === 'critical' ? 'Immédiat' : sev === 'high' ? '< 30 jours' : '< 90 jours';
+  dnsByType.subdomain_takeover.forEach(f => recos.push({ level: dnsRecoLevel(f.severity), text: `Prise de contrôle possible du sous-domaine ${f.asset_value} (CNAME vers ${f.details?.targetService || 'un service tiers non revendiqué'}) — supprimer l'enregistrement DNS ou revendiquer la ressource.`, asset: f.asset_value, delay: dnsRecoDelay(f.severity) }));
+  dnsByType.axfr_vulnerable.forEach(f => recos.push({ level: dnsRecoLevel(f.severity), text: `Transfert de zone DNS (AXFR) non restreint sur ${f.details?.nameserver || 'un serveur DNS'} — la table DNS complète est exposée.`, asset: domain, delay: dnsRecoDelay(f.severity) }));
+  dnsByType.dnssec_missing.forEach(f => recos.push({ level: dnsRecoLevel(f.severity), text: 'DNSSEC absent — le domaine est vulnérable au cache poisoning / DNS spoofing.', asset: domain, delay: dnsRecoDelay(f.severity) }));
+  dnsByType.origin_ip_exposed.forEach(f => recos.push({ level: dnsRecoLevel(f.severity), text: `IP d'origine ${f.asset_value} potentiellement accessible directement, hors protection CDN/WAF — vérifier la configuration du proxy.`, asset: f.asset_value, delay: dnsRecoDelay(f.severity) }));
+  dnsByType.cloud_storage_exposed.forEach(f => recos.push({ level: dnsRecoLevel(f.severity), text: `Bucket cloud ${f.details?.url || f.asset_value}${f.details?.accessible ? ' publiquement accessible' : ' existant (accès à auditer)'} — restreindre les permissions.`, asset: f.details?.url || f.asset_value, delay: dnsRecoDelay(f.severity) }));
+  if (dnsByType.stealer_log.length) {
+    const f = dnsByType.stealer_log[0];
+    recos.push({ level: dnsRecoLevel(f.severity), text: `Identifiants d'employés compromis détectés (${f.details?.employeesCompromised ?? '?'} employé(s), malware infostealer) — rotation immédiate des mots de passe et activation MFA.`, asset: domain, delay: dnsRecoDelay(f.severity) });
+  }
+  if (dnsByType.typosquatting.length) {
+    recos.push({ level: 'medium', text: `${dnsByType.typosquatting.length} domaine(s) similaire(s) enregistré(s) par des tiers (typosquatting) — surveillance et enregistrement défensif à envisager.`, asset: `${dnsByType.typosquatting.length} domaine(s)`, delay: '< 90 jours' });
   }
 
   const recoGroups = argusGroupAndSortRecos(recos);
@@ -5819,6 +5966,12 @@ function argusRenderScanReport({ companyName, domain, scopeId, clientId, assets,
     ${bgpRpkiSection}
     ${hibpSection}
     ${shodanSection}
+    ${originIpSection}
+    ${takeoverSection}
+    ${dnsSecuritySection}
+    ${cloudStorageSection}
+    ${stealerLogSection}
+    ${typosquattingSection}
     <div class="argus-report-section">
       <h4>Recommandations</h4>
       ${recoGroups.length ? recoGroups.map(g => `
@@ -6235,6 +6388,74 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
       </table>`
     : '';
 
+  // ── Sections 4m-4r : sécurité DNS étendue (argus_dns_findings, PARTIE 2-4) ──
+  const dnsByTypePdf = argusGroupDnsFindings(scanData.dnsFindings);
+
+  const originIpSectionPdf = `<h2>4m. Résilience CDN & IP d'origine</h2>
+    ${dnsByTypePdf.origin_ip_exposed.length
+      ? `<table>
+          <thead><tr><th>IP candidate</th><th>Source</th><th>Reverse DNS</th><th>Risque</th></tr></thead>
+          <tbody>${dnsByTypePdf.origin_ip_exposed.map(f => `<tr class="${f.severity === 'critical' ? 'critical' : f.severity === 'high' ? 'high' : ''}">
+            <td>${escHtml(f.asset_value)}</td><td>${escHtml(f.details?.source || '—')}</td><td>${escHtml(f.details?.reverseDns || '—')}</td><td>${argusRiskBadgePdf(f.severity)}</td>
+          </tr>`).join('')}</tbody>
+        </table>`
+      : `<p><span class="badge-green">✓</span> Aucune IP d'origine exposée détectée.</p>`}`;
+
+  const takeoverSectionPdf = `<h2>4n. Prise de contrôle de sous-domaines</h2>
+    ${dnsByTypePdf.subdomain_takeover.length
+      ? `<table>
+          <thead><tr><th>Sous-domaine</th><th>CNAME</th><th>Service</th><th>Sévérité</th></tr></thead>
+          <tbody>${dnsByTypePdf.subdomain_takeover.map(f => `<tr class="critical">
+            <td>${escHtml(f.asset_value)}</td><td>${escHtml(f.details?.cname || '—')}</td><td>${escHtml(f.details?.targetService || '—')}</td><td>${argusRiskBadgePdf(f.severity)}</td>
+          </tr>`).join('')}</tbody>
+        </table>`
+      : `<p><span class="badge-green">✓</span> Aucune prise de contrôle de sous-domaine détectée.</p>`}`;
+
+  const axfrFindingPdf = dnsByTypePdf.axfr_vulnerable[0] || null;
+  const dnssecFindingPdf = dnsByTypePdf.dnssec_missing[0] || null;
+  const dnsSecuritySectionPdf = `<h2>4o. Sécurité DNS (AXFR / DNSSEC)</h2>
+    <table>
+      <tbody>
+        <tr class="${axfrFindingPdf ? 'critical' : ''}"><td style="width:220px"><strong>Transfert de zone (AXFR)</strong></td><td>${axfrFindingPdf ? `<span class="badge-red">VULNÉRABLE (${escHtml(axfrFindingPdf.details?.nameserver || '')})</span>` : '<span class="badge-green">Non vulnérable</span>'}</td></tr>
+        <tr><td><strong>DNSSEC</strong></td><td>${dnssecFindingPdf ? '<span class="badge-orange">Absent</span>' : '<span class="badge-green">Actif</span>'}</td></tr>
+      </tbody>
+    </table>
+    ${axfrFindingPdf ? `<p style="color:#dc2626"><strong>Transfert de zone non restreint — l'attaquant peut obtenir la table DNS complète de l'infrastructure (${escHtml(axfrFindingPdf.details?.recordCount ?? '?')} enregistrements exposés).</strong></p>` : ''}`;
+
+  const cloudStorageSectionPdf = `<h2>4p. Stockage Cloud</h2>
+    ${dnsByTypePdf.cloud_storage_exposed.length
+      ? `<table>
+          <thead><tr><th>URL</th><th>Provider</th><th>Accessible</th><th>Sévérité</th></tr></thead>
+          <tbody>${dnsByTypePdf.cloud_storage_exposed.map(f => `<tr class="${f.severity === 'critical' ? 'critical' : 'high'}">
+            <td>${escHtml(f.details?.url || f.asset_value)}</td><td>${escHtml((f.details?.provider || '—').toUpperCase())}</td><td>${f.details?.accessible ? '✗ Publique' : '✓ Privée (existe)'}</td><td>${argusRiskBadgePdf(f.severity)}</td>
+          </tr>`).join('')}</tbody>
+        </table>`
+      : `<p><span class="badge-green">✓</span> Aucun bucket cloud exposé détecté.</p>`}`;
+
+  const stealerLogFindingPdf = dnsByTypePdf.stealer_log[0] || null;
+  const stealerLogSectionPdf = `<h2>4q. Stealer Logs (Identifiants compromis)</h2>
+    ${stealerLogFindingPdf
+      ? `<table>
+          <tbody>
+            <tr><td style="width:220px"><strong>Employés touchés</strong></td><td>${escHtml(stealerLogFindingPdf.details?.employeesCompromised ?? '—')}</td></tr>
+            <tr><td><strong>Familles malware principales</strong></td><td>${(stealerLogFindingPdf.details?.topMalwareFamilies || []).map(escHtml).join(', ') || '—'}</td></tr>
+            <tr><td><strong>Dernière compromission</strong></td><td>${stealerLogFindingPdf.details?.lastCompromised ? escHtml(new Date(stealerLogFindingPdf.details.lastCompromised).toLocaleDateString('fr-FR')) : '—'}</td></tr>
+            <tr><td><strong>Sévérité</strong></td><td>${argusRiskBadgePdf(stealerLogFindingPdf.severity)}</td></tr>
+          </tbody>
+        </table>
+        <p><em>Rotation immédiate des mots de passe + activation MFA recommandées.</em></p>`
+      : `<p><span class="badge-green">✓</span> Aucun identifiant compromis détecté.</p>`}`;
+
+  const typosquattingSectionPdf = `<h2>4r. Typosquatting</h2>
+    ${dnsByTypePdf.typosquatting.length
+      ? `<table>
+          <thead><tr><th>Domaine</th><th>Type de variation</th><th>Actif</th><th>Risque</th></tr></thead>
+          <tbody>${dnsByTypePdf.typosquatting.map(f => `<tr>
+            <td>${escHtml(f.asset_value)}</td><td>${escHtml(f.details?.variationType || '—')}</td><td>${f.details?.resolves ? '✓ Oui' : '✗ Non'}</td><td>${argusRiskBadgePdf(f.severity)}</td>
+          </tr>`).join('')}</tbody>
+        </table>`
+      : `<p><span class="badge-green">✓</span> Aucun domaine typosquat enregistré détecté.</p>`}`;
+
   // ── Section 5 : recommandations ──
   const recos = [];
   const openFindings = findings.filter(f => !['false_positive', 'remediated'].includes(f.status));
@@ -6332,6 +6553,23 @@ function argusBuildPdfReportHtml(scanData, summaryText) {
   // AMÉLIORATION — sous-domaines VirusTotal nouveaux (absents du scan initial), voir newVtSubdomainsPdf ci-dessus.
   if (newVtSubdomainsPdf.length) {
     recos.push({ level: 'high-priority', text: `Sous-domaines additionnels découverts via VirusTotal — exposition inconnue à évaluer : ${newVtSubdomainsPdf.join(', ')}`, asset: `${newVtSubdomainsPdf.length} sous-domaine(s)`, delay: '< 30 jours' });
+  }
+
+  // Sécurité DNS (argus_dns_findings, PARTIE 4) — sévérité toujours lue
+  // depuis le backend, jamais recalculée ici — même principe que ci-dessus.
+  const dnsRecoLevelPdf = sev => sev === 'critical' ? 'critical' : sev === 'high' ? 'high-priority' : 'medium';
+  const dnsRecoDelayPdf = sev => sev === 'critical' ? 'Immédiat' : sev === 'high' ? '< 30 jours' : '< 90 jours';
+  dnsByTypePdf.subdomain_takeover.forEach(f => recos.push({ level: dnsRecoLevelPdf(f.severity), text: `Prise de contrôle possible du sous-domaine ${f.asset_value} (CNAME vers ${f.details?.targetService || 'un service tiers non revendiqué'}) — supprimer l'enregistrement DNS ou revendiquer la ressource.`, asset: f.asset_value, delay: dnsRecoDelayPdf(f.severity) }));
+  dnsByTypePdf.axfr_vulnerable.forEach(f => recos.push({ level: dnsRecoLevelPdf(f.severity), text: `Transfert de zone DNS (AXFR) non restreint sur ${f.details?.nameserver || 'un serveur DNS'} — la table DNS complète est exposée.`, asset: domain, delay: dnsRecoDelayPdf(f.severity) }));
+  dnsByTypePdf.dnssec_missing.forEach(f => recos.push({ level: dnsRecoLevelPdf(f.severity), text: 'DNSSEC absent — le domaine est vulnérable au cache poisoning / DNS spoofing.', asset: domain, delay: dnsRecoDelayPdf(f.severity) }));
+  dnsByTypePdf.origin_ip_exposed.forEach(f => recos.push({ level: dnsRecoLevelPdf(f.severity), text: `IP d'origine ${f.asset_value} potentiellement accessible directement, hors protection CDN/WAF — vérifier la configuration du proxy.`, asset: f.asset_value, delay: dnsRecoDelayPdf(f.severity) }));
+  dnsByTypePdf.cloud_storage_exposed.forEach(f => recos.push({ level: dnsRecoLevelPdf(f.severity), text: `Bucket cloud ${f.details?.url || f.asset_value}${f.details?.accessible ? ' publiquement accessible' : ' existant (accès à auditer)'} — restreindre les permissions.`, asset: f.details?.url || f.asset_value, delay: dnsRecoDelayPdf(f.severity) }));
+  if (dnsByTypePdf.stealer_log.length) {
+    const f = dnsByTypePdf.stealer_log[0];
+    recos.push({ level: dnsRecoLevelPdf(f.severity), text: `Identifiants d'employés compromis détectés (${f.details?.employeesCompromised ?? '?'} employé(s), malware infostealer) — rotation immédiate des mots de passe et activation MFA.`, asset: domain, delay: dnsRecoDelayPdf(f.severity) });
+  }
+  if (dnsByTypePdf.typosquatting.length) {
+    recos.push({ level: 'medium', text: `${dnsByTypePdf.typosquatting.length} domaine(s) similaire(s) enregistré(s) par des tiers (typosquatting) — surveillance et enregistrement défensif à envisager.`, asset: `${dnsByTypePdf.typosquatting.length} domaine(s)`, delay: '< 90 jours' });
   }
 
   // Groupé/dédupliqué/trié par argusGroupAndSortRecos (BUG 2 — dedup Shodan déjà
@@ -6460,6 +6698,12 @@ ${robotsSectionPdf}
 ${virusTotalSectionPdf}
 ${googleDorksSectionPdf}
 ${bgpRpkiSectionPdf}
+${originIpSectionPdf}
+${takeoverSectionPdf}
+${dnsSecuritySectionPdf}
+${cloudStorageSectionPdf}
+${stealerLogSectionPdf}
+${typosquattingSectionPdf}
 
 <h2>5. Recommandations Prioritaires</h2>
 ${recoGroupsHtmlPdf}
@@ -6467,6 +6711,7 @@ ${recoScoreBoxPdf}
 
 <h2>6. Conclusion</h2>
 <p>Cette évaluation révèle ${assets.length} actif(s) exposé(s) et ${argusFindingCounts.total} finding(s) de sécurité : ${argusFindingCounts.critique} critique(s), ${argusFindingCounts.eleve} élevé(s), ${argusFindingCounts.moyen} moyen(s), ${argusFindingCounts.info} informatif(s). Sore Security recommande la mise en place d'un programme de surveillance continue de la surface d'attaque ainsi qu'un audit approfondi des points identifiés.</p>
+${(scanData.dnsFindings || []).length > 0 ? `<p>Cette évaluation inclut une analyse de sécurité DNS étendue (AXFR, DNSSEC, takeover, Cloud Storage, Stealer Logs, Typosquatting).</p>` : ''}
 <p><em>Les findings qualifiés "à confirmer" nécessitent un scan actif pour valider l'exposition réelle. Sore Security propose un audit intrusif ciblé sur les vecteurs prioritaires identifiés ci-dessus.</em></p>
 <p>Pour toute question ou pour approfondir cette évaluation :<br>contact@sore-security.com — sore-security.com</p>
 
