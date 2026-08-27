@@ -6402,7 +6402,9 @@ Sore Security recommande la mise en place d'une surveillance continue de la surf
  * ARIA) plus haut dans ce fichier.
  */
 async function argusGenerateExecutiveSummary(scanData) {
-  const { companyName, domain, assets, findings, intel, breaches = [] } = scanData;
+  // assets/findings défaultés à [] — même raison qu'argusBuildPdfReportHtml
+  // (contexte scan en masse : argusLastScanData incomplet).
+  const { companyName, domain, assets = [], findings = [], intel, breaches = [] } = scanData;
   const subdomains = [...new Set(assets.filter(a => a.asset_kind === 'subdomain').map(a => a.asset_value))];
   const criticalPoints = [];
   if (findings.some(f => f.confidence === 'high')) criticalPoints.push('credentials à haute confiance exposés publiquement');
@@ -6476,7 +6478,10 @@ function argusPdfTlsStatusBadge(tlsRisk) {
 
 /** Construit le document HTML complet de la fenêtre imprimable — indépendant du DOM affiché à l'écran. */
 function argusBuildPdfReportHtml(scanData, summaryText) {
-  const { companyName, domain, assets, exposures, findings, clientStatus, intel, breaches = [] } = scanData;
+  // exposures/assets/findings défaultés à [] : en contexte scan en masse
+  // (argusBulkGeneratePDF) argusLastScanData ne porte pas exposures, et
+  // argusGroupAssetsByValue itère exposures sans garde ("not iterable").
+  const { companyName, domain, assets = [], exposures = [], findings = [], clientStatus, intel, breaches = [] } = scanData;
   const argusFindingCounts = argusCountFindings(scanData); // Section 6 — voir sa définition, jamais 0 quand un score CRITIQUE existe
   const hibpBreaches = breaches.filter(b => b.source === 'hibp');
   const shodanFindings = argusDedupeShodanFindings(breaches.filter(b => b.source === 'shodan'));
@@ -7095,8 +7100,19 @@ async function argusGeneratePDFReport() {
   btn.disabled = true;
   btn.innerHTML = '⏳ Génération du rapport en cours...';
   try {
-    const summaryText = await argusGenerateExecutiveSummary(argusLastScanData);
-    const html = argusBuildPdfReportHtml(argusLastScanData, summaryText);
+    // Contexte scan en masse (argusBulkGeneratePDF) : argusLastScanData n'a
+    // pas toutes les clés d'un scan unitaire — on défaulte les conteneurs
+    // itérés sans garde par argusGroupAssetsByValue / argusBuildPdfReportHtml.
+    const scanData = argusLastScanData;
+    scanData.exposures   = scanData.exposures   || [];
+    scanData.summary     = scanData.summary     || {};
+    scanData.assets      = scanData.assets      || [];
+    scanData.findings    = scanData.findings    || [];
+    scanData.breaches    = scanData.breaches    || [];
+    scanData.dnsFindings = scanData.dnsFindings || [];
+    scanData.intel       = scanData.intel       || {};
+    const summaryText = await argusGenerateExecutiveSummary(scanData);
+    const html = argusBuildPdfReportHtml(scanData, summaryText);
     const win = window.open('', '_blank');
     if (!win) { showToast('⚠ Pop-up bloquée — autorisez les pop-ups pour générer le rapport'); return; }
     win.document.write(html);
@@ -7138,6 +7154,11 @@ async function argusGeneratePDFReport() {
 async function argusGeneratePentestProposal() {
   if (!argusLastScanData) { showToast('⚠ Lancez d\'abord un scan.'); return; }
   const { clientId, scopeId, companyName, domain } = argusLastScanData;
+  // Cette fonction ne lit qu'clientId/scopeId/companyName/domain (aucun accès à
+  // exposures/summary/assets ici) — le POST /argus/pentest-proposal renvoie 500
+  // si clientId ou scopeId manque. En contexte scan en masse ils sont bien
+  // présents dans entry.scanData, on garde juste un garde-fou explicite.
+  if (!clientId || !scopeId) { showToast('⚠ Données de scope incomplètes — relancez le scan avant de générer la proposition.'); return; }
 
   const btn = document.getElementById('argus-pentest-btn');
   const originalLabel = btn.innerHTML;
