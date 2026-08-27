@@ -1465,7 +1465,7 @@ select.form-input option{background:var(--surface)}
           </div>
 
           <div class="table-wrap"><table class="data-table" id="argus-bulk-table">
-            <thead><tr><th>#</th><th>Société</th><th>Domaine</th><th>Statut</th><th>Findings</th><th>Score</th><th style="text-align:center; padding:8px 10px; font-size:11px; color:#4a5568; font-weight:500;">Détail</th><th style="text-align:center; padding:8px 10px; font-size:11px; color:#4a5568; font-weight:500;">Rapport PDF</th><th style="text-align:center; padding:8px 10px; font-size:11px; color:#4a5568; font-weight:500;">Proposition</th></tr></thead>
+            <thead><tr><th>#</th><th>Société</th><th>Domaine</th><th>Statut</th><th>Findings</th><th>Score</th><th style="text-align:center; padding:8px 10px; font-size:11px; color:#4a5568; font-weight:500;">Détail</th><th style="text-align:center; padding:8px 10px; font-size:11px; color:#4a5568; font-weight:500;">Rapport PDF</th><th style="text-align:center; padding:8px 10px; font-size:11px; color:#4a5568; font-weight:500;">Rapport Word</th><th style="text-align:center; padding:8px 10px; font-size:11px; color:#4a5568; font-weight:500;">Proposition</th></tr></thead>
             <tbody id="argus-bulk-tbody"></tbody>
           </table></div>
         </div>
@@ -1483,6 +1483,7 @@ select.form-input option{background:var(--surface)}
               <div class="lbl">Score d'exposition</div>
             </div>
             <button class="action-btn primary" id="argus-pdf-btn" style="margin-top:0" onclick="argusGeneratePDFReport()">📄 Générer rapport PDF</button>
+            <button class="action-btn" id="argus-word-btn" style="margin-left:8px;background:#155e2b;color:white;border:none" onclick="argusGenerateWordReport()">📝 Rapport Word</button>
             <button class="action-btn" id="argus-pentest-btn" style="margin-left:8px;background:#1a2b5e;color:white;border:none" onclick="argusGeneratePentestProposal()">🎯 Générer proposition pentest</button>
           </div>
         </div>
@@ -5147,6 +5148,9 @@ function argusBulkRowHtml(i, e) {
   const pdfCell = done
     ? `<button onclick="argusBulkGeneratePDF(${i})" title="Générer le rapport PDF de reconnaissance passive" style="font-size:11px; padding:4px 10px; background:#0a1a2a; color:#60a5fa; border:1px solid #2563eb; border-radius:4px; cursor:pointer;">📄 PDF</button>`
     : '—';
+  const wordCell = done
+    ? `<button onclick="argusBulkGenerateWordReport(${i})" id="bulk-word-btn-${i}" title="Générer le rapport EASM complet (Markdown prêt pour Word)" style="font-size:11px; padding:4px 10px; background:#0a1f12; color:#4ade80; border:1px solid #155e2b; border-radius:4px; cursor:pointer;">📝 Word</button>`
+    : '—';
   const proposalCell = done
     ? `<button onclick="argusBulkGenerateProposal(${i})" id="bulk-proposal-btn-${i}" title="Générer une proposition de pentest IA" style="font-size:11px; padding:4px 10px; background:#0a1a0a; color:#4ade80; border:1px solid #16a34a; border-radius:4px; cursor:pointer;">🎯 Proposition</button>`
     : '—';
@@ -5159,6 +5163,7 @@ function argusBulkRowHtml(i, e) {
     <td>${e.status === 'done' ? argusBulkScoreBadge(e.score) : '—'}</td>
     <td id="bulk-detail-${i}" style="text-align:center">${detailCell}</td>
     <td id="bulk-pdf-${i}" style="text-align:center">${pdfCell}</td>
+    <td id="bulk-word-${i}" style="text-align:center">${wordCell}</td>
     <td id="bulk-proposal-${i}" style="text-align:center">${proposalCell}</td>
   </tr>`;
 }
@@ -5420,6 +5425,23 @@ async function argusBulkGenerateProposal(idx) {
       btn.textContent = '🎯 Proposition';
       btn.disabled = false;
     }
+  }
+}
+
+async function argusBulkGenerateWordReport(idx) {
+  const entry = argusBulkEntries[idx];
+  if (!entry || !entry.scanData) return;
+
+  const btn = document.getElementById('bulk-word-btn-' + idx);
+  if (btn) { btn.textContent = '⏳ Génération...'; btn.disabled = true; }
+
+  try {
+    argusLastScanData = entry.scanData;
+    await argusGenerateWordReport();
+  } catch (err) {
+    alert('Erreur génération rapport : ' + err.message);
+  } finally {
+    if (btn) { btn.textContent = '📝 Word'; btn.disabled = false; }
   }
 }
 
@@ -6446,6 +6468,362 @@ NE PAS mentionner de noms de vendors IA ou d'outils tiers.`;
 
   if (res.ok && res.data?.content) return res.data.content;
   return ARGUS_PDF_FALLBACK_SUMMARY;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ARGUS — Rapport EASM complet "prêt pour Word" (Markdown -> HTML imprimable)
+// ════════════════════════════════════════════════════════════════════════════
+// Génère le rapport multi-sections décrit par ARGUS_EASM_REPORT_INSTRUCTION via
+// /ai/chat, convertit le Markdown en HTML et ouvre une fenêtre avec bouton
+// « Copier pour Word ». Les tableaux sont en table-layout:fixed + width:100% :
+// collés dans Word ils tiennent dans le cadre de la page A4 (colonnes qui se
+// partagent la largeur + retour à la ligne du contenu long, pas de débordement).
+
+const ARGUS_EASM_REPORT_INSTRUCTION = `Tu es l'analyste senior en cyber-reconnaissance et Threat Intelligence de SORE SECURITY.
+Ta mission est d'analyser les données brutes de reconnaissance passive (DNS, TLS, Shodan, VirusTotal, GitHub/GitLab, réputation, enregistrements email) d'une organisation cible et de générer un rapport d'évaluation de surface d'attaque (External Attack Surface Assessment) irréprochable, pragmatique et à forte valeur ajoutée.
+
+================================================================================
+RÈGLES D'EXPERTISE ET FILTRAGE DES FAUX POSITIFS (CRITIQUE)
+================================================================================
+1. DIFFÉRENCIATION CDN / ORIGINE (Cloudflare, Akamai, Fastly, AWS CloudFront) :
+   - NE JAMAIS qualifier d'incident de sécurité les ports de bordure Cloudflare (2052, 2053, 2082, 2083, 2086, 2087, 2095, 2096, 8080, 8443, 8880). Ce sont des proxys HTTP/HTTPS standards, à classer en INFO uniquement.
+   - Si un sous-domaine comme "ftp.domaine.com" pointe vers une IP Cloudflare proxifiée (orange-clouded), expliquer que le protocole FTP ne traverse pas le proxy HTTP, et éviter d'attribuer le port 21 du serveur d'origine à l'IP Cloudflare.
+   - Ne pas affirmer que l'IP d'origine est masquée si un sous-domaine actif (comme www ou mail) pointe vers une IP directe sans CDN.
+
+2. HÉBERGEMENTS MUTUALISÉS (cPanel, Plesk, MTDS, Genious, OVH, etc.) :
+   - Si l'IP résout de multiples services standards (ports 21, 53, 110, 143, 465, 587, 993, 995, 2083, 2086, 2096), identifier la signature d'un hébergement mutualisé/cPanel.
+   - Ne pas compter chaque port ouvert individuellement comme une vulnérabilité critique distincte. Regrouper sous : « Exposition d'un environnement d'hébergement mutualisé/cPanel avec services d'administration et messagerie non cloisonnés ».
+
+3. GITHUB / SECRETS EXPOSÉS :
+   - Vérifier le contexte du dépôt. Si le fichier contient des valeurs indicatives (ex: "your_api_key", "<password>", "cluster.mongodb.net/dbname"), classer en "Exemple/Placeholder public" et requalifier le risque en FAIBLE/INFO.
+   - N'attribuer le statut ÉLEVÉ/CRITIQUE que si le repository appartient manifestement à l'organisation ou à un développeur interne identifié, avec des credentials exploitables réels.
+
+4. SECTEUR D'ACTIVITÉ & CONFORMITÉ RÉGLEMENTAIRE :
+   - Adapter le cadre réglementaire au secteur de l'entreprise :
+     * Banques & Établissements de paiement -> Directives Bank Al-Maghrib (BAM), PCI-DSS.
+     * Industrie, Retail, Énergie, Services -> Loi 09-08 (CNDP), ISO 27001, Loi 05-20 (DGSSI / DNSSI si OIV/PSIE).
+   - NE JAMAIS appliquer les obligations Bank Al-Maghrib à une entreprise non financière.
+
+5. COHÉRENCE MATHÉMATIQUE DES SCORES :
+   - Le décompte des findings (Critique, Élevé, Moyen, Info) dans la section Recommandations, dans le score global et dans la conclusion doit être 100 % cohérent et identique.
+
+================================================================================
+STRUCTURE DU RAPPORT POUR MICROSOFT WORD
+================================================================================
+Génère le rapport en Markdown propre, structuré avec une hiérarchie stricte (# Titre 1, ## Titre 2, ### Titre 3) et des tableaux standards Markdown. Garde les tableaux à 5 colonnes maximum, avec des intitulés de colonnes courts et des cellules concises (phrases nominales, pas de paragraphes), pour qu'ils tiennent dans la largeur d'une page A4 une fois collés dans Word.
+
+---
+
+# RAPPORT D'ÉVALUATION DE SURFACE D'ATTAQUE
+**SORE SECURITY | Plateforme d'Intelligence Souveraine**
+
+* **Référence :** [ASA-YYYYMMDD-XXXX]
+* **Organisation cible :** [Nom de l'entreprise]
+* **Domaine principal :** [domaine.com]
+* **Date d'analyse :** [Date]
+* **Classification :** STRICTEMENT CONFIDENTIEL
+* **Méthodologie :** Reconnaissance Passive Exclusive (OSINT / Non-intrusif)
+
+---
+
+## 1. Résumé Exécutif & Posture Globale
+*Rédiger une synthèse concise de 3 à 4 paragraphes destinée au RSSI et au Comité de Direction :*
+- **Posture générale :** Niveau de maturité global perçu depuis l'extérieur.
+- **Points de vigilance majeurs :** Les 2 ou 3 constats réels et vérifiés (ex: absence de DMARC, exposition d'un sous-domaine de dev/staging, services d'administration exposés).
+- **Impacts métier potentiels :** Risque de phishing/usurpation de marque, fuite d'informations pré-production, compromission d'infrastructure.
+- **Score de Risque Global :** [🔴 CRITIQUE | 🟠 ÉLEVÉ | 🟡 MOYEN | 🟢 MAÎTRISÉ]
+
+---
+
+## 2. Cartographie des Actifs & Surface Web
+*Présenter sous forme de tableau les actifs découverts et leur statut :*
+
+| Actif / Sous-domaine | Type | IP / Infrastructure | Certificat TLS | Exposition |
+| :--- | :--- | :--- | :--- | :--- |
+| ... | ... | ... | ... | ... |
+
+*Commentaire d'analyse : préciser si les actifs de production sont sous CDN/WAF et analyser les sous-domaines orphelins ou de staging détectés via l'historique.*
+
+---
+
+## 3. Analyse Approfondie des Vecteurs d'Exposition
+
+### 3.1. Gouvernance de la Messagerie & Risque Phishing
+| Protocole | État détecté | Politique appliquée | Analyse & Conformité |
+| :--- | :--- | :--- | :--- |
+| **SPF** | [Actif / Absent] | [ex: -all, ~all] | ... |
+| **DKIM** | [Présent / Absent] | [ex: Actif / Non résolu] | ... |
+| **DMARC** | [Actif / Absent] | [ex: none, quarantine, reject] | ... |
+
+*Commentaire d'impact : expliquer l'exploitabilité en scénario d'ingénierie sociale ou de fraude au président, en citant le référentiel sectoriel adéquat (BAM / CNDP / ISO 27001).*
+
+### 3.2. Exposition Réseau, Ports & Services Détectés
+| IP / Hôte | Ports ouverts | Service & Version | Qualification du risque |
+| :--- | :--- | :--- | :--- |
+| ... | ... | ... | [Faux positif CDN / Service mutualisé / Service critique] |
+
+*Analyse technique : expliciter l'impact réel et éliminer formellement les bruits générés par les proxys de bordure.*
+
+### 3.3. Analyse du Code Public, Credentials & Fuites de Données
+- **Sources analysées :** GitHub, GitLab, Dark Web / Stealers, Pastebin, bases de données de brèches.
+- **Résultat :** [Détailler les findings qualifiés ou attester de l'absence de fuite avérée].
+
+---
+
+## 4. Matrice de Remédiation & Plan d'Action Priorisé
+
+### 🔴 Actions Critiques (Immédiat — < 7 jours)
+| # | Action corrective | Actif concerné | Impact évité |
+| :-: | :--- | :--- | :--- |
+| 1 | ... | ... | ... |
+
+### 🟠 Actions Prioritaires (< 30 jours)
+| # | Action corrective | Actif concerné | Impact évité |
+| :-: | :--- | :--- | :--- |
+| 1 | ... | ... | ... |
+
+### 🟡 Améliorations & Bonnes Pratiques (< 90 jours)
+| # | Action corrective | Actif concerné | Impact évité |
+| :-: | :--- | :--- | :--- |
+| 1 | Déploiement du fichier security.txt (RFC 9116) | [domaine.com] | Formalisation du canal de divulgation responsable |
+
+---
+
+## 5. Décompte Consolidé & Prochaines Étapes
+- **🔴 Critiques :** X
+- **🟠 Élevés :** Y
+- **🟡 Moyens :** Z
+- **🔵 Informatifs :** W
+
+**Recommandation d'audit actif :**
+La reconnaissance passive ne mesurant que la surface visible, Sore Security recommande la réalisation d'un **test d'intrusion ciblé (Web Application & External Infrastructure Pentest)** afin d'éprouver l'étanchéité des services découverts et de valider les mécanismes de défense en profondeur.
+
+---
+*SORE SECURITY — Document confidentiel — contact@sore-security.com — sore-security.com*`;
+
+// Sérialise les données brutes du scan (défensif : tout champ peut manquer en
+// contexte scan en masse). Réutilise argusGroupAssetsByValue comme le PDF.
+function argusBuildEasmDataBlock(scanData) {
+  const d = scanData || {};
+  const assets = d.assets || [], breaches = d.breaches || [], findings = d.findings || [];
+  const dnsFindings = d.dnsFindings || [], intel = d.intel || {};
+  const grouped = argusGroupAssetsByValue(assets, d.exposures || []);
+  const L = [];
+  L.push(`Organisation : ${d.companyName || '—'}`);
+  L.push(`Domaine principal : ${d.domain || '—'}`);
+  L.push(`Date d'analyse : ${new Date().toLocaleDateString('fr-FR')}`);
+  L.push('');
+  L.push(`== ACTIFS / SOUS-DOMAINES (${grouped.length}) ==`);
+  grouped.forEach(g => {
+    const tls = g.tls ? `TLS ${g.tls.issuer || '?'} exp.${g.tls.daysUntilExpiry ?? '?'}j risque=${g.tls.tlsRisk || 'n/a'}` : 'TLS=aucun';
+    const cves = (g.cves && g.cves.length) ? `CVE=[${g.cves.map(c => `${c.cve_id || '?'}(${c.cvss_score ?? '?'})`).join(', ')}]` : 'CVE=aucun';
+    const hdrs = (g.headers && Object.keys(g.headers).length) ? `headers_exposes=[${Object.keys(g.headers).join(', ')}]` : 'headers=—';
+    L.push(`- ${g.assetValue} | IP=${(g.ips && g.ips.length) ? g.ips.join(', ') : 'non_resolu'} | source=${g.source || 'DNS'} | ${tls} | ${cves} | ${hdrs} | risque_backend=${g.riskLevel || 'n/a'}`);
+  });
+  L.push('');
+  const em = intel.emailSecurity || {};
+  L.push('== MESSAGERIE (enregistrements DNS) ==');
+  L.push(`SPF: ${em.hasSPF ? 'present' : 'ABSENT'}${em.spfPolicy ? ` (${em.spfPolicy})` : ''} risque=${em.spfRisk || 'n/a'}`);
+  L.push(`DKIM: ${em.hasDKIM ? 'present' : 'ABSENT'}${em.dkimSelector ? ` (selecteur ${em.dkimSelector})` : ''}`);
+  L.push(`DMARC: ${em.hasDMARC ? 'present' : 'ABSENT'}${em.dmarcPolicy ? ` (p=${em.dmarcPolicy})` : ''} risque=${em.dmarcRisk || 'n/a'}`);
+  L.push('');
+  const shodan = breaches.filter(b => b.source === 'shodan');
+  L.push(`== SERVICES EXPOSÉS / SHODAN (${shodan.length}) ==`);
+  shodan.forEach(f => L.push(`- ${f.ip}:${f.port} | ${f.service_banner || 'service?'} | severite=${f.severity || 'n/a'}`));
+  if (!shodan.length) L.push('- aucun');
+  L.push('');
+  const hibp = breaches.filter(b => b.source === 'hibp');
+  L.push(`== FUITES DE DONNÉES / HIBP (${hibp.length}) ==`);
+  hibp.forEach(f => L.push(`- ${f.breach_name} | date=${f.breach_date || '?'} | comptes=${f.breach_count ?? '?'} | classes=[${(f.data_classes || []).join(', ')}] | severite=${f.severity || 'n/a'}`));
+  if (!hibp.length) L.push('- aucune breche averee');
+  L.push('');
+  L.push(`== CODE PUBLIC / CREDENTIALS (${findings.length}) ==`);
+  findings.forEach(f => L.push(`- repo=${f.repo_url} | fichier=${f.file_path} | type=${f.finding_type} | source=${f.source} | confiance=${f.confidence} | statut=${f.status} | extrait_redacte="${(f.matched_snippet || '').slice(0, 140)}"`));
+  if (!findings.length) L.push('- aucun finding');
+  L.push('');
+  L.push(`== FINDINGS DNS / OSINT AVANCÉ (${dnsFindings.length}) ==`);
+  dnsFindings.forEach(f => {
+    const det = (f.details && typeof f.details === 'object')
+      ? (f.details.note || f.details.url || f.details.targetService || f.details.nameserver || JSON.stringify(f.details).slice(0, 140))
+      : '';
+    L.push(`- type=${f.finding_type} | actif=${f.asset_value || d.domain} | severite=${f.severity || 'n/a'} | statut=${f.status || 'open'}${det ? ` | detail=${det}` : ''}`);
+  });
+  if (!dnsFindings.length) L.push('- aucun');
+  L.push('');
+  if (intel.techStack && intel.techStack.length) {
+    L.push('== STACK TECHNIQUE ==');
+    intel.techStack.forEach(t => L.push(`- ${t.assetValue}: ${[t.cms, t.server, t.language, t.framework, t.cdn].filter(Boolean).join(' / ') || '—'}`));
+    L.push('');
+  }
+  if (intel.asn && intel.asn.length) {
+    L.push('== ASN / HÉBERGEMENT ==');
+    intel.asn.forEach(a => L.push(`- ${a.asn != null ? 'AS' + a.asn : '?'} ${a.asnName || ''}${a.isHosting ? ' (hebergeur cloud)' : ''}`));
+    L.push('');
+  }
+  const w = intel.whois;
+  if (w) {
+    L.push('== WHOIS ==');
+    L.push(`registrar=${w.registrar || '—'} | NS=[${(w.nameservers || []).join(', ') || '—'}] | expiration=${w.expiryDate || w.expiry || w.expiration || '—'}`);
+    L.push('');
+  }
+  const vt = intel.virusTotal;
+  if (vt && (vt.vtSubdomains || []).length) {
+    L.push(`== VIRUSTOTAL — sous-domaines historiques (${vt.vtSubdomains.length}) ==`);
+    L.push(vt.vtSubdomains.slice(0, 40).join(', '));
+    L.push('');
+  }
+  return L.join('\n');
+}
+
+// Convertisseur Markdown -> HTML minimal (titres, tableaux GFM, listes, hr,
+// gras/italique/code, paragraphes). Suffisant pour la sortie contrôlée du
+// modèle ; volontairement pas de dépendance externe (CSP stricte).
+function argusMarkdownToHtml(md) {
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const inline = s => esc(s)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+  const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
+  const parseRow = r => r.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length
+        && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1]) && lines[i + 1].includes('-')) {
+      const headers = parseRow(line);
+      i += 2;
+      const body = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { body.push(parseRow(lines[i])); i++; }
+      let t = '<table><thead><tr>' + headers.map(h => `<th>${inline(h)}</th>`).join('') + '</tr></thead><tbody>';
+      t += body.map(cells => '<tr>' + headers.map((_, ci) => `<td>${inline(cells[ci] || '')}</td>`).join('') + '</tr>').join('');
+      out.push(t + '</tbody></table>');
+      continue;
+    }
+    let m;
+    if ((m = line.match(/^\s*(#{1,4})\s+(.*)$/))) { const l = m[1].length; out.push(`<h${l}>${inline(m[2])}</h${l}>`); i++; continue; }
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { out.push('<hr>'); i++; continue; }
+    if (/^\s*[-*+]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) { items.push(`<li>${inline(lines[i].replace(/^\s*[-*+]\s+/, ''))}</li>`); i++; }
+      out.push('<ul>' + items.join('') + '</ul>');
+      continue;
+    }
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { items.push(`<li>${inline(lines[i].replace(/^\s*\d+\.\s+/, ''))}</li>`); i++; }
+      out.push('<ol>' + items.join('') + '</ol>');
+      continue;
+    }
+    if (/^\s*$/.test(line)) { i++; continue; }
+    const para = [line]; i++;
+    while (i < lines.length && !/^\s*$/.test(lines[i])
+        && !/^\s*(#{1,4}\s|[-*+]\s|\d+\.\s|\|)/.test(lines[i]) && !/^\s*-{3,}\s*$/.test(lines[i])) {
+      para.push(lines[i]); i++;
+    }
+    out.push(`<p>${inline(para.join(' '))}</p>`);
+  }
+  return out.join('\n');
+}
+
+// Document imprimable / collable dans Word. table-layout:fixed + width:100% =
+// les tableaux tiennent dans le cadre de la page une fois collés.
+function argusBuildWordReportHtml(companyName, domain, bodyHtml) {
+  const closeScript = '<' + '/script>';
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8">
+<title>Rapport EASM — ${escHtml(companyName)}${domain ? ' (' + escHtml(domain) + ')' : ''}</title>
+<style>
+@page { size: A4; margin: 2cm; }
+* { box-sizing: border-box; }
+body { font-family: 'Calibri','Segoe UI',Arial,sans-serif; font-size: 11pt; color: #1a1a1a; line-height: 1.45; max-width: 17cm; margin: 24px auto; padding: 0 12px; background: #fff; }
+h1 { font-size: 19pt; color: #1a2b5e; border-bottom: 2px solid #1a2b5e; padding-bottom: 6px; margin: 24px 0 12px; }
+h2 { font-size: 15pt; color: #1a2b5e; border-bottom: 1px solid #c9d3e6; padding-bottom: 3px; margin: 22px 0 10px; }
+h3 { font-size: 12.5pt; color: #24427a; margin: 16px 0 8px; }
+h4 { font-size: 11pt; color: #24427a; margin: 12px 0 6px; }
+p { margin: 8px 0; }
+ul, ol { margin: 8px 0 8px 22px; }
+li { margin: 3px 0; }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; margin: 10px 0; font-size: 9.5pt; }
+th, td { border: 1px solid #9aa7bd; padding: 5px 7px; text-align: left; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word; hyphens: auto; }
+th { background: #1a2b5e; color: #fff; font-weight: 600; }
+tbody tr:nth-child(even) td { background: #f4f6fb; }
+code { background: #eef1f7; padding: 1px 4px; border-radius: 3px; font-family: Consolas,'Courier New',monospace; font-size: 9pt; }
+hr { border: 0; border-top: 1px solid #c9d3e6; margin: 18px 0; }
+strong { color: #14213d; }
+.sore-toolbar { position: sticky; top: 0; background: #1a2b5e; padding: 10px 12px; margin: -24px -12px 20px; display: flex; gap: 10px; z-index: 10; }
+.sore-toolbar button { font: inherit; font-size: 10pt; padding: 6px 14px; border: 0; border-radius: 4px; cursor: pointer; background: #fff; color: #1a2b5e; font-weight: 600; }
+@media print { .sore-toolbar { display: none; } body { margin: 0; max-width: none; } }
+</style></head><body>
+<div class="sore-toolbar">
+  <button onclick="soreCopyReport()">📋 Copier pour Word</button>
+  <button onclick="window.print()">🖨 Imprimer / Enregistrer en PDF</button>
+</div>
+<div id="sore-report-body">
+${bodyHtml}
+</div>
+<script>
+function soreCopyReport() {
+  var el = document.getElementById('sore-report-body');
+  var range = document.createRange();
+  range.selectNode(el);
+  var sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  var ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+  sel.removeAllRanges();
+  alert(ok
+    ? 'Rapport copie. Ouvrez Word et collez avec Ctrl+V : les tableaux s ajustent a la largeur de la page.'
+    : 'Copie automatique bloquee. Faites Ctrl+A puis Ctrl+C dans cette fenetre, puis collez dans Word.');
+}
+${closeScript}
+</body></html>`;
+}
+
+async function argusGenerateWordReport() {
+  if (!argusLastScanData) { showToast('⚠ Aucune donnée de scan disponible — relancez un scan d\'abord'); return; }
+  const btn = document.getElementById('argus-word-btn');
+  const originalLabel = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Génération du rapport…'; }
+  try {
+    const s = argusLastScanData;
+    s.exposures = s.exposures || [];
+    s.assets = s.assets || [];
+    s.findings = s.findings || [];
+    s.breaches = s.breaches || [];
+    s.dnsFindings = s.dnsFindings || [];
+    s.intel = s.intel || {};
+
+    const prompt = ARGUS_EASM_REPORT_INSTRUCTION
+      + '\n\n================================================================================\n'
+      + 'DONNÉES BRUTES DE RECONNAISSANCE PASSIVE (plateforme SORE SECURITY)\n'
+      + '================================================================================\n'
+      + argusBuildEasmDataBlock(s)
+      + '\n\nGénère maintenant le rapport complet en Markdown en suivant EXACTEMENT la structure '
+      + 'et les 5 règles de filtrage ci-dessus. N\'invente aucune donnée absente ; si une '
+      + 'section est vide, l\'indiquer explicitement. Le décompte de la section 5 doit être '
+      + 'strictement identique à celui de la matrice de la section 4.';
+
+    const res = await argusScanFetch('/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify({ messages: [{ role: 'user', content: prompt }] }),
+    }, 90000, false); // rapport long — un seul appel, pas de retry-on-timeout
+
+    if (!res.ok || !res.data?.content) {
+      showToast('❌ Échec de génération du rapport : ' + (res.data?.error || `HTTP ${res.status}`));
+      return;
+    }
+
+    const html = argusBuildWordReportHtml(s.companyName || 'Organisation', s.domain || '', argusMarkdownToHtml(res.data.content));
+    const win = window.open('', '_blank');
+    if (!win) { showToast('⚠ Pop-up bloquée — autorisez les pop-ups pour afficher le rapport'); return; }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = originalLabel; }
+  }
 }
 
 // Trois échelles distinctes, gardées séparées plutôt qu'une seule fonction à
