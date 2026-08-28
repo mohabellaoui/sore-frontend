@@ -771,6 +771,20 @@ select.form-input option{background:var(--surface)}
 }
 .status-pill.prospect,.sev-badge.prospect-tag{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(255,170,0,.3)}
 
+/* ── SCOUT — rendu du mémoire technique (scout_memoires.content_html, déjà assaini côté backend) ── */
+.scout-memoire{font-family:var(--font-body);font-size:13px;color:var(--text);line-height:1.7;max-height:640px;overflow-y:auto;padding-right:8px}
+.scout-memoire h1{font-family:var(--font-display);font-size:19px;color:var(--text-bright);margin:0 0 12px;font-weight:700}
+.scout-memoire h2{font-family:var(--font-mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--cyan);margin:20px 0 8px}
+.scout-memoire h3{font-size:13px;color:var(--text-bright);margin:14px 0 6px}
+.scout-memoire p{margin:0 0 10px}
+.scout-memoire ul,.scout-memoire ol{margin:0 0 10px 20px}
+.scout-memoire li{margin:0 0 4px}
+.scout-memoire strong{color:var(--text-bright)}
+.scout-memoire code{font-family:var(--font-mono);font-size:12px;background:var(--surface);border:1px solid var(--line2);border-radius:3px;padding:1px 5px}
+.scout-memoire hr{border:0;border-top:1px solid var(--line);margin:16px 0}
+.scout-memoire a{color:var(--cyan)}
+.scout-trigger-chip{background:var(--surface);border:1px solid var(--line);color:var(--text-dim);padding:2px 9px;border-radius:4px;font-size:10px;font-family:var(--font-mono)}
+
 /* ── RESPONSIVE ── */
 @media(max-width:900px){
   .stats-grid{grid-template-columns:1fr 1fr}
@@ -872,6 +886,7 @@ select.form-input option{background:var(--surface)}
         <div class="tb-btn tb-dropdown-btn" onclick="toggleTbDropdown(event,'business')"><span class="tb-icon">💼</span><span>Business</span><span class="tb-dropdown-caret">▾</span></div>
         <div class="tb-dropdown-menu">
           <div class="tb-dropdown-item" onclick="nav('augur')" data-page="augur"><span class="tb-icon">🔮</span><span>AUGUR</span></div>
+          <div class="tb-dropdown-item" onclick="nav('scout')" data-page="scout"><span class="tb-icon">📋</span><span>Appels d'offres</span></div>
           <div class="tb-dropdown-item" onclick="nav('services')" data-page="services"><span class="tb-icon">◈</span><span>Services</span></div>
           <div class="tb-dropdown-item" onclick="nav('commande')" data-page="commande"><span class="tb-icon">◇</span><span>Commander</span></div>
           <div class="tb-dropdown-item" onclick="nav('reports')" data-page="reports"><span class="tb-icon">▦</span><span>Rapports</span></div>
@@ -1908,6 +1923,128 @@ select.form-input option{background:var(--surface)}
       </div>
     </div>
 
+    <!-- ══ SCOUT — Veille commerciale appels d'offres (agent SCOUT, admin-only) ══ -->
+    <div class="page" id="page-scout">
+      <div class="section-header">
+        <div><div class="section-title">Appels d'offres — Veille commerciale</div><div class="section-sub">Détection automatique des consultations cybersécurité sur marchespublics.gov.ma · Agent SCOUT</div></div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <button class="action-btn" onclick="loadScout()">↺ Actualiser</button>
+          <button class="action-btn primary" id="scout-run-btn" onclick="scoutRunCycle()">▶ Lancer un cycle</button>
+        </div>
+      </div>
+
+      <!-- Affiché aux profils non-admin : confort UX uniquement, le vrai contrôle est backend (requireRole('admin') sur les 4 routes /api/scout/*). -->
+      <div class="card" id="scout-restricted" style="display:none">
+        <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim);padding:8px 0">🔒 Module réservé aux administrateurs.</div>
+      </div>
+
+      <div id="scout-list-view" style="display:none">
+        <div class="stats-grid">
+          <div class="stat-card cyan">
+            <div class="stat-label-top">Opportunités</div>
+            <div class="stat-val cyan" id="scout-stat-total">—</div>
+            <div class="stat-sub">total en base</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label-top">Priorité critique</div>
+            <div class="stat-val" id="scout-stat-critique" style="color:var(--red)">—</div>
+            <div class="stat-sub">page courante</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label-top">Échéance &lt; 7 jours</div>
+            <div class="stat-val" id="scout-stat-soon" style="color:var(--amber)">—</div>
+            <div class="stat-sub">page courante</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:20px">
+          <div class="section-header" style="margin-bottom:14px">
+            <div class="card-title" style="margin:0"><span class="dot" style="background:var(--cyan)"></span>Opportunités détectées</div>
+            <div style="display:flex;gap:10px">
+              <select class="form-input" id="scout-f-status" onchange="loadScoutOpportunities()" style="width:auto">
+                <option value="">Tous statuts</option>
+                <option value="new">Nouvelle</option>
+                <option value="qualified">Qualifiée</option>
+                <option value="proposal_sent">Proposition envoyée</option>
+                <option value="won">Gagnée</option>
+                <option value="lost">Perdue</option>
+              </select>
+              <select class="form-input" id="scout-f-sector" onchange="loadScoutOpportunities()" style="width:auto">
+                <option value="">Tous secteurs</option>
+                <option value="banques">Banques</option>
+                <option value="assurances">Assurances</option>
+                <option value="telecoms">Télécoms</option>
+                <option value="secteur_public">Secteur public</option>
+                <option value="sante">Santé</option>
+                <option value="energie">Énergie</option>
+                <option value="autre">Autre</option>
+              </select>
+              <select class="form-input" id="scout-f-priority" onchange="loadScoutOpportunities()" style="width:auto">
+                <option value="">Toutes priorités</option>
+                <option value="critique">Critique</option>
+                <option value="eleve">Élevée</option>
+                <option value="moyen">Moyenne</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-wrap"><table class="data-table" id="scout-table">
+            <thead><tr><th>Acheteur public</th><th>Secteur</th><th>Deadline</th><th>Priorité</th><th>Statut</th><th></th></tr></thead>
+            <tbody id="scout-tbody"><tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div id="scout-detail-view" style="display:none">
+        <div style="margin-bottom:14px">
+          <button class="action-btn" onclick="showScoutList()">‹ Retour aux opportunités</button>
+        </div>
+
+        <div class="card">
+          <div class="section-header" style="margin-bottom:14px">
+            <div class="card-title" style="margin:0"><span class="dot" style="background:var(--cyan)"></span><span id="scout-d-title">—</span></div>
+            <div style="display:flex;gap:10px;align-items:center">
+              <span id="scout-d-priority"></span>
+              <select class="form-input" id="scout-d-status" style="width:auto" onchange="scoutUpdateStatus(this.value)">
+                <option value="">Changer le statut…</option>
+                <option value="new">Nouvelle</option>
+                <option value="qualified">Qualifiée</option>
+                <option value="proposal_sent">Proposition envoyée</option>
+                <option value="won">Gagnée</option>
+                <option value="lost">Perdue</option>
+              </select>
+            </div>
+          </div>
+          <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);line-height:2.1">
+            Acheteur : <span id="scout-d-acheteur" style="color:var(--text)">—</span><br>
+            Secteur : <span id="scout-d-sector" style="color:var(--text)">—</span> · Statut : <span id="scout-d-statuslabel" style="color:var(--text)">—</span><br>
+            Référence : <span id="scout-d-ref" style="color:var(--text)">—</span> · Deadline : <span id="scout-d-deadline" style="color:var(--text)">—</span><br>
+            Source : <a id="scout-d-source" href="#" target="_blank" rel="noopener noreferrer" style="color:var(--cyan)">marchespublics.gov.ma ↗</a>
+          </div>
+          <div style="margin-top:14px">
+            <div style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Objet de la consultation</div>
+            <div id="scout-d-objet" style="font-size:13px;color:var(--text);line-height:1.6">—</div>
+          </div>
+          <div style="margin-top:14px" id="scout-d-triggers-wrap">
+            <div style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Signaux détectés</div>
+            <div id="scout-d-triggers" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:20px" id="scout-d-argus-card">
+          <div class="card-title"><span class="dot" style="background:var(--amber)"></span>Enrichissement ARGUS</div>
+          <div id="scout-d-argus" style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);line-height:2">—</div>
+        </div>
+
+        <div class="card" style="margin-top:20px">
+          <div class="section-header" style="margin-bottom:14px">
+            <div class="card-title" style="margin:0"><span class="dot" style="background:var(--green)"></span>Mémoire technique</div>
+            <select class="form-input" id="scout-memoire-select" style="width:auto;display:none" onchange="scoutShowMemoire(this.value)"></select>
+          </div>
+          <div id="scout-memoire-content" class="scout-memoire">—</div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /main -->
 </div><!-- /app -->
 
@@ -2156,6 +2293,7 @@ function nav(page) {
   if (page === 'integrations') loadIntegrationsPage();
   if (page === 'chronicle') loadChronicle();
   if (page === 'augur') loadAugur();
+  if (page === 'scout') loadScout();
   if (page === 'threatintel') loadThreatIntel();
 }
 
@@ -9655,6 +9793,261 @@ function animateStat(id, target) {
     if (p < 1) requestAnimationFrame(update);
   }
   requestAnimationFrame(update);
+}
+
+// ════════════════════════════════════════════
+// SCOUT — Veille commerciale appels d'offres (agent SCOUT)
+//
+// Les 4 routes /api/scout/* sont admin-only CÔTÉ BACKEND
+// (requireRole('admin') — vérifié dans src/index.js + __tests__/security/
+// rbac-detailed.test.js). Le guard `currentUser?.role !== 'admin'` dans
+// loadScout() ci-dessous n'est QU'UN CONFORT UX (ne pas afficher un onglet
+// vide ni lancer des appels qui renverront 403 à un profil non-admin) — ce
+// N'EST PAS le contrôle de sécurité, qui reste entièrement backend.
+// ════════════════════════════════════════════
+let scoutCurrentId = null;
+let scoutCurrentMemoires = [];
+
+const SCOUT_STATUS_LABELS = {
+  new: 'Nouvelle', qualified: 'Qualifiée', proposal_sent: 'Proposition envoyée',
+  won: 'Gagnée', lost: 'Perdue',
+};
+const SCOUT_SECTOR_LABELS = {
+  banques: 'Banques', assurances: 'Assurances', telecoms: 'Télécoms',
+  secteur_public: 'Secteur public', sante: 'Santé', energie: 'Énergie', autre: 'Autre',
+};
+const SCOUT_PRIORITY = {
+  critique: { cls: 'critical', label: 'CRITIQUE' },
+  eleve:    { cls: 'high',     label: 'ÉLEVÉE' },
+  moyen:    { cls: 'medium',   label: 'MOYENNE' },
+};
+const SCOUT_SKIP_REASONS = {
+  no_domain: 'domaine non résolu', scope_rejected: 'périmètre rejeté',
+  argus_error: 'erreur ARGUS', cycle_cap: 'plafond du cycle atteint',
+};
+
+function scoutPriorityBadge(p) {
+  const cfg = SCOUT_PRIORITY[p];
+  if (!cfg) return '<span style="color:var(--text-dim)">—</span>';
+  return `<span class="sev-badge ${cfg.cls}">${cfg.label}</span>`;
+}
+
+function scoutStatusBadge(s) {
+  const cfg = {
+    new:           { c: 'var(--cyan)',     b: 'var(--cyan-dim)' },
+    qualified:     { c: 'var(--amber)',    b: 'var(--amber-dim)' },
+    proposal_sent: { c: 'var(--amber)',    b: 'var(--amber-dim)' },
+    won:           { c: 'var(--green)',    b: 'var(--green-dim)' },
+    lost:          { c: 'var(--text-dim)', b: 'rgba(120,130,140,.12)' },
+  }[s] || { c: 'var(--text-dim)', b: 'rgba(120,130,140,.12)' };
+  return `<span style="background:${cfg.b};color:${cfg.c};border:1px solid ${cfg.c};border-radius:4px;
+    padding:2px 8px;font-size:10px;font-family:var(--font-mono);text-transform:uppercase">${escHtml(SCOUT_STATUS_LABELS[s] || s)}</span>`;
+}
+
+function scoutFmtDeadline(iso) {
+  if (!iso) return '<span style="color:var(--text-dim)">—</span>';
+  const d = new Date(iso);
+  if (isNaN(d)) return '<span style="color:var(--text-dim)">—</span>';
+  const days = Math.ceil((d - Date.now()) / 86400000);
+  const txt = d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const color = days < 7 ? 'var(--red)' : days < 21 ? 'var(--amber)' : 'var(--text)';
+  const suffix = days < 0 ? ' (dépassée)' : days === 0 ? " (aujourd'hui)" : ` (J-${days})`;
+  return `<span style="color:${color}">${txt}<span style="color:var(--text-dim);font-size:10px">${suffix}</span></span>`;
+}
+
+async function loadScout() {
+  const restricted = document.getElementById('scout-restricted');
+  const listView = document.getElementById('scout-list-view');
+  const detailView = document.getElementById('scout-detail-view');
+  const runBtn = document.getElementById('scout-run-btn');
+
+  if (currentUser?.role !== 'admin') {
+    restricted.style.display = 'block';
+    listView.style.display = 'none';
+    detailView.style.display = 'none';
+    if (runBtn) runBtn.style.display = 'none';
+    return;
+  }
+  restricted.style.display = 'none';
+  if (runBtn) runBtn.style.display = '';
+  showScoutList();
+  await loadScoutOpportunities();
+}
+
+function showScoutList() {
+  document.getElementById('scout-list-view').style.display = 'block';
+  document.getElementById('scout-detail-view').style.display = 'none';
+}
+
+function scoutFilterQuery() {
+  const params = [];
+  const st = document.getElementById('scout-f-status')?.value;
+  const se = document.getElementById('scout-f-sector')?.value;
+  const pr = document.getElementById('scout-f-priority')?.value;
+  if (st) params.push('status=' + encodeURIComponent(st));
+  if (se) params.push('sector=' + encodeURIComponent(se));
+  if (pr) params.push('priority_score=' + encodeURIComponent(pr));
+  params.push('limit=200');
+  return params.join('&');
+}
+
+async function loadScoutOpportunities() {
+  const tbody = document.getElementById('scout-tbody');
+  const res = await apiCall('/scout/opportunities?' + scoutFilterQuery());
+  if (!res) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune donnée — accès insuffisant ou erreur réseau</td></tr>`;
+    ['scout-stat-total', 'scout-stat-critique', 'scout-stat-soon'].forEach(id => { document.getElementById(id).textContent = '—'; });
+    return;
+  }
+  const rows = res.data || [];
+  document.getElementById('scout-stat-total').textContent = res.total ?? rows.length;
+  document.getElementById('scout-stat-critique').textContent = rows.filter(o => o.priority_score === 'critique').length;
+  document.getElementById('scout-stat-soon').textContent = rows.filter(o => {
+    if (!o.deadline) return false;
+    const days = Math.ceil((new Date(o.deadline) - Date.now()) / 86400000);
+    return days >= 0 && days < 7;
+  }).length;
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune opportunité — lancez un cycle</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  rows.forEach(o => {
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.onclick = () => openScoutOpportunity(o.id);
+    tr.innerHTML = `
+      <td>${escHtml(o.company_name || '—')}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(SCOUT_SECTOR_LABELS[o.sector] || o.sector || '—')}</td>
+      <td style="font-family:var(--font-mono);font-size:11px">${scoutFmtDeadline(o.deadline)}</td>
+      <td>${scoutPriorityBadge(o.priority_score)}</td>
+      <td>${scoutStatusBadge(o.status)}</td>
+      <td><button class="icon-btn" onclick="event.stopPropagation();openScoutOpportunity('${o.id}')" title="Ouvrir">→</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function openScoutOpportunity(id) {
+  const res = await apiCall('/scout/opportunities/' + id);
+  if (!res || !res.data) { showToast('❌ Opportunité introuvable'); return; }
+  const { opportunity: o, latestMemoire, memoires } = res.data;
+  scoutCurrentId = o.id;
+  scoutCurrentMemoires = memoires || [];
+
+  document.getElementById('scout-list-view').style.display = 'none';
+  document.getElementById('scout-detail-view').style.display = 'block';
+
+  document.getElementById('scout-d-title').textContent = o.company_name || 'Opportunité';
+  document.getElementById('scout-d-priority').innerHTML = scoutPriorityBadge(o.priority_score);
+  document.getElementById('scout-d-acheteur').textContent = o.company_name || '—';
+  document.getElementById('scout-d-sector').textContent = SCOUT_SECTOR_LABELS[o.sector] || o.sector || '—';
+  document.getElementById('scout-d-statuslabel').textContent = SCOUT_STATUS_LABELS[o.status] || o.status || '—';
+  document.getElementById('scout-d-ref').textContent = o.external_ref || '—';
+  document.getElementById('scout-d-deadline').innerHTML = scoutFmtDeadline(o.deadline);
+  document.getElementById('scout-d-objet').textContent = o.description || '—';
+  document.getElementById('scout-d-status').value = '';
+
+  const src = document.getElementById('scout-d-source');
+  if (o.source_url) { src.href = o.source_url; src.style.pointerEvents = ''; src.style.opacity = ''; }
+  else { src.removeAttribute('href'); src.style.pointerEvents = 'none'; src.style.opacity = '.4'; }
+
+  // Signaux détectés — triggers_matched.keywords (+ catégorie portail)
+  const kw = Array.isArray(o.triggers_matched?.keywords) ? o.triggers_matched.keywords : [];
+  const trWrap = document.getElementById('scout-d-triggers-wrap');
+  const trEl = document.getElementById('scout-d-triggers');
+  if (kw.length) {
+    trWrap.style.display = '';
+    trEl.innerHTML = kw.map(k => `<span class="scout-trigger-chip">${escHtml(k)}</span>`).join('');
+    if (o.triggers_matched?.category) {
+      trEl.innerHTML += `<span class="scout-trigger-chip" style="color:var(--text-dim)">catégorie : ${escHtml(o.triggers_matched.category)}</span>`;
+    }
+  } else { trWrap.style.display = 'none'; }
+
+  // Enrichissement ARGUS — résumé simple de argus_findings
+  const af = o.argus_findings || {};
+  const argusCard = document.getElementById('scout-d-argus-card');
+  const argusEl = document.getElementById('scout-d-argus');
+  if (af.skipped) {
+    argusCard.style.display = '';
+    argusEl.innerHTML = `<span style="color:var(--text-dim)">Aucun scan — ${escHtml(SCOUT_SKIP_REASONS[af.reason] || af.reason || 'non enrichi')}. Le scoring de priorité ne dépend pas d'ARGUS.</span>`;
+  } else if (Object.keys(af).length) {
+    argusCard.style.display = '';
+    const dns = af.dnsFindings?.count ?? 0;
+    const breach = af.breachFindings?.count ?? 0;
+    argusEl.innerHTML =
+      `Domaine : <span style="color:var(--text)">${escHtml(af.domain || '—')}</span><br>` +
+      `Actifs découverts : <span style="color:var(--text)">${af.assetsDiscovered ?? 0}</span><br>` +
+      `Findings DNS : <span style="color:${dns ? 'var(--amber)' : 'var(--text)'}">${dns}</span> · ` +
+      `Fuites / breach : <span style="color:${breach ? 'var(--amber)' : 'var(--text)'}">${breach}</span><br>` +
+      `Dernier scan : <span style="color:var(--text)">${af.lastScanAt ? new Date(af.lastScanAt).toLocaleString('fr-FR') : '—'}</span>` +
+      (af.rescanned === false ? ' <span style="color:var(--text-dim)">(findings réutilisés)</span>' : '');
+  } else {
+    argusCard.style.display = 'none';
+  }
+
+  // Mémoire technique
+  scoutRenderMemoireSelector();
+  scoutShowMemoire(scoutCurrentMemoires.length ? '0' : '');
+}
+
+function scoutRenderMemoireSelector() {
+  const sel = document.getElementById('scout-memoire-select');
+  if (scoutCurrentMemoires.length > 1) {
+    sel.style.display = '';
+    sel.innerHTML = scoutCurrentMemoires.map((m, i) => {
+      const d = new Date(m.created_at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      const g = m.generated_by === 'groq' ? 'Groq' : 'modèle de secours';
+      return `<option value="${i}">${d} — ${g}${i === 0 ? ' (dernier)' : ''}</option>`;
+    }).join('');
+  } else {
+    sel.style.display = 'none';
+  }
+}
+
+function scoutShowMemoire(idx) {
+  const el = document.getElementById('scout-memoire-content');
+  if (idx === '' || !scoutCurrentMemoires.length) {
+    el.innerHTML = '<span style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun mémoire technique — généré automatiquement pour les priorités « critique » et « élevée ».</span>';
+    return;
+  }
+  const m = scoutCurrentMemoires[+idx] || scoutCurrentMemoires[0];
+  // content_html vient du converti escape-first du backend (docs/scout.md
+  // § markdownToHtml : n'émet que h1-3/p/strong/em/code/ul/ol/li/hr/a[http|mailto],
+  // <script> structurellement impossible). Injection directe assumée — même
+  // mécanisme que argus-report-content.innerHTML pour le rapport EASM (on fait
+  // confiance au HTML qu'on a soi-même généré et assaini côté serveur).
+  el.innerHTML = m.content_html || '<span style="color:var(--text-dim)">(mémoire vide)</span>';
+}
+
+async function scoutRunCycle() {
+  const btn = document.getElementById('scout-run-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Démarrage…'; }
+  const res = await apiCallEx('/scout/run', { method: 'POST' });
+  if (btn) { btn.disabled = false; btn.textContent = '▶ Lancer un cycle'; }
+
+  if (res.ok) {
+    showToast('⬡ Cycle SCOUT démarré — le balayage tourne en arrière-plan (2-20 min). Actualisez dans quelques minutes.');
+  } else if (res.data?.reason === 'already_running') {
+    showToast("⬡ Un cycle SCOUT est déjà en cours — patientez avant d'en relancer un.");
+  } else {
+    showToast('❌ ' + (res.error || 'Impossible de démarrer le cycle'));
+  }
+}
+
+async function scoutUpdateStatus(status) {
+  if (!status || !scoutCurrentId) return;
+  const res = await apiCallEx('/scout/opportunities/' + scoutCurrentId + '/status', {
+    method: 'PATCH', body: JSON.stringify({ status }),
+  });
+  if (!res.ok) {
+    showToast('❌ ' + (res.error || 'Échec du changement de statut'));
+    return;
+  }
+  showToast('✅ Statut mis à jour : ' + (SCOUT_STATUS_LABELS[status] || status));
+  const id = scoutCurrentId;
+  await openScoutOpportunity(id);   // rafraîchit la vue détail
+  await loadScoutOpportunities();   // et la liste sous-jacente
 }
 
 let toastTimer;
