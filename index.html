@@ -1480,7 +1480,7 @@ select.form-input option{background:var(--surface)}
           </div>
 
           <div class="table-wrap"><table class="data-table" id="argus-bulk-table">
-            <thead><tr><th>#</th><th>Société</th><th>Domaine</th><th>Statut</th><th>Findings</th><th>Score</th><th style="text-align:center; padding:8px 10px; font-size:11px; color:#4a5568; font-weight:500;">Détail</th><th style="text-align:center; padding:8px 10px; font-size:11px; color:#4a5568; font-weight:500;">Rapport PDF</th><th style="text-align:center; padding:8px 10px; font-size:11px; color:#4a5568; font-weight:500;">Rapport Word</th><th style="text-align:center; padding:8px 10px; font-size:11px; color:#4a5568; font-weight:500;">Proposition</th></tr></thead>
+            <thead><tr><th>#</th><th>Société</th><th>Domaine</th><th>Statut</th><th>Findings</th><th>Score</th><th style="padding:8px 10px; font-size:11px; color:#4a5568; font-weight:500;">Progression</th><th style="text-align:center; padding:8px 10px; font-size:11px; color:#4a5568; font-weight:500;">PDF</th></tr></thead>
             <tbody id="argus-bulk-tbody"></tbody>
           </table></div>
         </div>
@@ -5278,20 +5278,39 @@ function argusBulkScoreBadge(score) {
   if (score === 'OK') return argusStatusBadge('ok', 'OK');
   return '—';
 }
+// Contenu de la mini barre de progression d'une ligne (partagé entre le rendu
+// initial de la ligne et argusBulkUpdateRowProgress — jamais dupliqué).
+function argusBulkProgressInner(pct, label, color) {
+  return `
+    <div style="display:flex; flex-direction:column; gap:3px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-size:10px; color:${color}; font-family:'JetBrains Mono',monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100px;">${escHtml(label)}</span>
+        <span style="font-size:10px; color:${color}; font-family:'JetBrains Mono',monospace; font-weight:bold;">${pct}%</span>
+      </div>
+      <div style="width:100%; height:3px; background:#0a1628; border-radius:2px; overflow:hidden;">
+        <div style="height:100%; width:${pct}%; background:${color}; border-radius:2px; transition:width 0.4s ease; ${pct === 100 ? '' : 'box-shadow:0 0 4px ' + color + ';'}"></div>
+      </div>
+    </div>`;
+}
+
 function argusBulkRowHtml(i, e) {
   const done = e.status === 'done';
-  const detailCell = done
-    ? `<button onclick="argusBulkViewReport(${i})" title="Voir le rapport détaillé" style="font-size:11px; padding:4px 10px; background:#0a2a3a; color:#00b4dc; border:1px solid #00b4dc; border-radius:4px; cursor:pointer;">👁 Voir</button>`
-    : '—';
-  const pdfCell = done
-    ? `<button onclick="argusBulkGeneratePDF(${i})" title="Générer le rapport PDF de reconnaissance passive" style="font-size:11px; padding:4px 10px; background:#0a1a2a; color:#60a5fa; border:1px solid #2563eb; border-radius:4px; cursor:pointer;">📄 PDF</button>`
-    : '—';
-  const wordCell = done
-    ? `<button onclick="argusBulkGenerateWordReport(${i})" id="bulk-word-btn-${i}" title="Générer le rapport EASM complet (Markdown prêt pour Word)" style="font-size:11px; padding:4px 10px; background:#0a1f12; color:#4ade80; border:1px solid #155e2b; border-radius:4px; cursor:pointer;">📝 Word</button>`
-    : '—';
-  const proposalCell = done
-    ? `<button onclick="argusBulkGenerateProposal(${i})" id="bulk-proposal-btn-${i}" title="Générer une proposition de pentest IA" style="font-size:11px; padding:4px 10px; background:#0a1a0a; color:#4ade80; border:1px solid #16a34a; border-radius:4px; cursor:pointer;">🎯 Proposition</button>`
-    : '—';
+  let pdfCell;
+  if (done) {
+    pdfCell = `<button onclick="argusBulkGeneratePDF(${i})" id="bulk-pdf-btn-${i}" style="font-size:11px; padding:4px 12px; background:#0a1a2a; color:#60a5fa; border:1px solid #2563eb; border-radius:4px; cursor:pointer;">📄 PDF</button>`;
+  } else if (e.status === 'running') {
+    pdfCell = `<span style="font-size:11px; color:#00b4dc;">⟳</span>`;
+  } else if (e.status === 'error') {
+    pdfCell = `<span style="font-size:11px; color:#dc2626;" title="${escHtml(e.error || '')}">✗ Erreur</span>`;
+  } else {
+    pdfCell = '—';
+  }
+  // La progression est persistée sur l'entry (progPct/progLabel/progColor) par
+  // argusBulkUpdateRowProgress — ainsi un re-render complet de la ligne
+  // (argusBulkUpdateRow) ne l'efface pas.
+  const progInner = (e.progPct != null)
+    ? argusBulkProgressInner(e.progPct, e.progLabel || 'En attente', e.progColor || '#4a5568')
+    : `<span style="font-size:11px; color:#4a5568; font-family:'JetBrains Mono',monospace;">En attente</span>`;
   return `<tr id="argus-bulk-row-${i}">
     <td>${i + 1}</td>
     <td>${escHtml(e.company)}</td>
@@ -5299,10 +5318,8 @@ function argusBulkRowHtml(i, e) {
     <td>${argusBulkStatusBadge(e)}</td>
     <td>${e.status === 'done' ? e.findings : '—'}</td>
     <td>${e.status === 'done' ? argusBulkScoreBadge(e.score) : '—'}</td>
-    <td id="bulk-detail-${i}" style="text-align:center">${detailCell}</td>
+    <td id="bulk-prog-${i}" style="padding:6px 10px; min-width:140px;">${progInner}</td>
     <td id="bulk-pdf-${i}" style="text-align:center">${pdfCell}</td>
-    <td id="bulk-word-${i}" style="text-align:center">${wordCell}</td>
-    <td id="bulk-proposal-${i}" style="text-align:center">${proposalCell}</td>
   </tr>`;
 }
 function argusBulkRenderTable(entries) {
@@ -5317,12 +5334,56 @@ function argusBulkUpdateStatus(msg) {
   if (el) el.textContent = msg;
 }
 
+// ── Progression par ligne — chaque société a sa propre mini barre ──
+// Les intervalles d'animation sont stockés par index de ligne pour pouvoir les
+// arrêter individuellement (fin de scan, erreur, relance).
+const argusBulkAnimations = new Map();
+
+function argusBulkStopAnimation(idx) {
+  if (argusBulkAnimations.has(idx)) {
+    clearInterval(argusBulkAnimations.get(idx));
+    argusBulkAnimations.delete(idx);
+  }
+}
+
+// Anime la barre d'UNE ligne de fromPct à toPct sur durationMs (20 paliers).
+function argusBulkAnimateProgress(idx, fromPct, toPct, durationMs, label, color) {
+  argusBulkStopAnimation(idx);
+  const steps = 20;
+  const stepMs = durationMs / steps;
+  const inc = (toPct - fromPct) / steps;
+  let current = fromPct;
+  const id = setInterval(() => {
+    current = Math.min(current + inc, toPct);
+    argusBulkUpdateRowProgress(idx, Math.round(current), label, color);
+    if (current >= toPct) argusBulkStopAnimation(idx);
+  }, stepMs);
+  argusBulkAnimations.set(idx, id);
+}
+
+// Met à jour la cellule de progression d'une ligne ET persiste l'état sur
+// l'entry (pour survivre à un argusBulkUpdateRow qui régénère toute la ligne).
+function argusBulkUpdateRowProgress(idx, pct, label, color) {
+  color = color || '#00b4dc';
+  const entry = argusBulkEntries[idx];
+  if (entry) { entry.progPct = pct; entry.progLabel = label; entry.progColor = color; }
+  const cell = document.getElementById('bulk-prog-' + idx);
+  if (cell) cell.innerHTML = argusBulkProgressInner(pct, label, color);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// SCAN EN MASSE — architecture 3 phases :
+//   Phase A  prospect + scope + approve         → 100% parallèle (rapide)
+//   Phase B  scan passif /argus/scan/:scopeId   → semaphore, max 3 simultanés
+//   Phase C  lecture des findings               → 100% parallèle (rapide)
+// Échec isolé PAR LIGNE : une op qui casse ne bloque jamais les autres.
+// ═══════════════════════════════════════════════════════════════════════
 async function argusBulkScanStart() {
   if (argusBulkRunning) return;
 
   const text = document.getElementById('argus-bulk-input').value;
   argusBulkEntries = argusBulkParse(text);
-  if (argusBulkEntries.length === 0) { showToast('⚠ Aucun domaine valide.'); return; }
+  if (argusBulkEntries.length === 0) { showToast('⚠ Aucun domaine valide. Vérifiez le format.'); return; }
 
   argusBulkRunning = true;
   const btn = document.getElementById('argus-bulk-start-btn');
@@ -5332,31 +5393,56 @@ async function argusBulkScanStart() {
   document.getElementById('argus-bulk-dashboard').style.display = 'block';
   document.getElementById('argus-bulk-progress-bar').style.width = '0%';
   argusBulkRenderTable(argusBulkEntries);
-  document.querySelector('#bulk-stat-total .stat-val').textContent = argusBulkEntries.length;
-  document.querySelector('#bulk-stat-running .stat-val').textContent = '0';
-  document.querySelector('#bulk-stat-done .stat-val').textContent = '0';
-  document.querySelector('#bulk-stat-error .stat-val').textContent = '0';
-  document.querySelector('#bulk-stat-findings .stat-val').textContent = '0';
 
+  const total = argusBulkEntries.length;
   const startTime = Date.now();
-  const SCAN_CONCURRENCY = 2; // Max scans passifs simultanés (Shodan/VirusTotal/HudsonRock)
+  const SCAN_CONCURRENCY = 3; // Max scans passifs simultanés — Phase B (Shodan/VirusTotal/HudsonRock)
 
-  // ══ PHASE A — prospect + scope + approve, en parallèle (aucune dépendance externe) ══
-  argusBulkUpdateStatus('Phase 1/3 — Préparation des scopes...');
+  // Stats globales + ETA — recalculées après chaque changement d'état de ligne.
+  function updateStats() {
+    const done  = argusBulkEntries.filter(e => e.status === 'done').length;
+    const err   = argusBulkEntries.filter(e => e.status === 'error').length;
+    const run   = argusBulkEntries.filter(e => e.status === 'running').length;
+    const finds = argusBulkEntries.reduce((s, e) => s + (e.findings || 0), 0);
+    document.querySelector('#bulk-stat-total .stat-val').textContent = total;
+    document.querySelector('#bulk-stat-done .stat-val').textContent = done;
+    document.querySelector('#bulk-stat-error .stat-val').textContent = err;
+    document.querySelector('#bulk-stat-running .stat-val').textContent = run;
+    document.querySelector('#bulk-stat-findings .stat-val').textContent = finds;
+    const pct = Math.round(((done + err) / total) * 100);
+    document.getElementById('argus-bulk-progress-bar').style.width = pct + '%';
+    if (done + err > 0) {
+      const elapsed = (Date.now() - startTime) / 1000;
+      const avg = elapsed / (done + err);
+      const remaining = (total - done - err) * avg;
+      const mm = Math.floor(remaining / 60), ss = Math.floor(remaining % 60);
+      document.getElementById('argus-bulk-eta').textContent =
+        done + err < total ? `ETA : ~${mm}min ${ss}s`
+                           : `Terminé en ${Math.floor(elapsed / 60)}min ${Math.floor(elapsed % 60)}s`;
+    }
+  }
+  updateStats();
+
+  // ══════════════════════════════
+  // PHASE A — prospect + scope + approve, 100% parallèle
+  // ══════════════════════════════
+  document.getElementById('argus-bulk-eta').textContent = 'Phase 1/3 — Préparation...';
 
   await Promise.all(argusBulkEntries.map(async (entry, i) => {
+    argusBulkUpdateRowProgress(i, 5, 'Initialisation...', '#00b4dc');
     try {
-      // Prospect — POST /api/argus/prospect renvoie {clientId, status, created}
-      // directement sur .data (pas de niveau .data.data ici), voir argusScanStart.
+      // Prospect — POST /api/argus/prospect renvoie {clientId, status, created} sur .data.
+      argusBulkUpdateRowProgress(i, 10, 'Prospect...', '#00b4dc');
       const pRes = await argusScanFetch('/argus/prospect', {
         method: 'POST', body: JSON.stringify({ company_name: entry.company, domain: entry.domain }),
       }, 15000);
       if (!pRes.ok) throw new Error(pRes.data?.error || `Prospect: HTTP ${pRes.status}`);
       entry.clientId = pRes.data?.clientId;
+      if (!entry.clientId) throw new Error('Prospect: clientId manquant dans la réponse');
 
-      // Scope — POST /api/argus/scope, 400 "déjà enregistré" = scope existant à récupérer
-      // (voir argusScanStart : seul ce message précis signale un doublon, tout autre 400
-      // est une vraie erreur de validation qu'il ne faut jamais avaler silencieusement).
+      // Scope — POST /api/argus/scope (201 { data: <row> }). 400 "déjà enregistré" =
+      // scope existant à récupérer via GET ; tout autre 400 = vraie erreur.
+      argusBulkUpdateRowProgress(i, 25, 'Scope...', '#00b4dc');
       let scopeRow;
       const sRes = await argusScanFetch('/argus/scope', {
         method: 'POST', body: JSON.stringify({ clientId: entry.clientId, assetValue: entry.domain, assetType: 'domain' }),
@@ -5365,222 +5451,191 @@ async function argusBulkScanStart() {
         scopeRow = sRes.data?.data;
         entry.scopeId = scopeRow?.id;
       } else if (sRes.status === 400 && /déjà enregistré/i.test(sRes.data?.error || '')) {
-        const exRes = await argusScanFetch(`/argus/scope?clientId=${entry.clientId}`, {}, 10000);
+        const exRes = await argusScanFetch(`/argus/scope?clientId=${entry.clientId}`, {}, 15000);
         scopeRow = (exRes.data?.data || []).find(s => s.asset_value === entry.domain);
         entry.scopeId = scopeRow?.id;
-        if (!entry.scopeId) throw new Error('Scope signalé comme déjà existant mais introuvable.');
       } else {
         throw new Error(sRes.data?.error || `Scope: HTTP ${sRes.status}`);
       }
+      if (!entry.scopeId) throw new Error('Scope introuvable');
 
-      // Approve — skip si déjà approuvé (scope récupéré ci-dessus).
+      // Approve — PATCH /api/argus/scope/:id/approve (idempotent côté backend).
+      argusBulkUpdateRowProgress(i, 35, 'Approbation...', '#00b4dc');
       if (scopeRow?.status !== 'approved') {
-        const aRes = await argusScanFetch(`/argus/scope/${entry.scopeId}/approve`, { method: 'PATCH' }, 10000);
+        const aRes = await argusScanFetch(`/argus/scope/${entry.scopeId}/approve`, { method: 'PATCH' }, 15000);
         if (!aRes.ok) throw new Error(aRes.data?.error || `Approve: HTTP ${aRes.status}`);
       }
 
       entry.phase = 'ready';
+      argusBulkUpdateRowProgress(i, 40, 'Prêt', '#00b4dc');
     } catch (err) {
+      argusBulkStopAnimation(i);
       entry.status = 'error';
       entry.error = err.message;
       entry.phase = 'error';
+      argusBulkUpdateRowProgress(i, 40, 'Erreur', '#dc2626');
       argusBulkUpdateRow(i, entry);
+      updateStats();
     }
   }));
 
-  document.getElementById('argus-bulk-progress-bar').style.width = '20%';
+  // ══════════════════════════════
+  // PHASE B — scans passifs, semaphore (max SCAN_CONCURRENCY)
+  // ══════════════════════════════
+  document.getElementById('argus-bulk-eta').textContent =
+    `Phase 2/3 — Scans passifs (max ${SCAN_CONCURRENCY} simultanés)...`;
 
-  // ══ PHASE B — scans passifs, concurrence limitée (contrainte APIs externes) ══
-  argusBulkUpdateStatus(`Phase 2/3 — Scans passifs (max ${SCAN_CONCURRENCY} simultanés)...`);
+  const ready = argusBulkEntries
+    .map((e, i) => ({ entry: e, idx: i }))
+    .filter(({ entry }) => entry.phase === 'ready');
 
-  const readyEntries = argusBulkEntries.map((e, i) => ({ entry: e, idx: i })).filter(({ entry }) => entry.phase === 'ready');
-  let activeScans = 0, completedScans = 0;
+  let activeScans = 0;
 
   await new Promise(resolve => {
-    let queueIdx = 0;
-    function tryLaunchNext() {
-      while (activeScans < SCAN_CONCURRENCY && queueIdx < readyEntries.length) {
-        const { entry, idx } = readyEntries[queueIdx++];
+    let qi = 0;
+    function next() {
+      if (ready.length === 0) { resolve(); return; }
+      while (activeScans < SCAN_CONCURRENCY && qi < ready.length) {
+        const { entry, idx } = ready[qi++];
         activeScans++;
+
         entry.status = 'running';
         argusBulkUpdateRow(idx, entry);
-        document.querySelector('#bulk-stat-running .stat-val').textContent = activeScans;
+        updateStats();
 
-        // 120000ms — même timeout que le scan individuel (argusScanStart) :
-        // BGP/RPKI + Wayback + VirusTotal + Google Dorks + la nouvelle sécurité
-        // DNS étendue peuvent porter un scan passif complet à 90-120s.
+        // Barre 50% → 68% animée sur 20s pendant le scan (par ligne).
+        argusBulkUpdateRowProgress(idx, 50, 'Scan passif...', '#f59e0b');
+        argusBulkAnimateProgress(idx, 50, 68, 20000, 'Enrichissement...', '#f59e0b');
+
+        // 120000ms — même timeout que le scan individuel (BGP/RPKI + Wayback +
+        // VirusTotal + Google Dorks + sécurité DNS étendue = 90-120s réels).
         argusScanFetch(`/argus/scan/${entry.scopeId}`, { method: 'POST' }, 120000)
           .then(res => {
             if (!res.ok) throw new Error(res.data?.error || `Scan: HTTP ${res.status}`);
             entry.phase = 'scanned';
+            argusBulkStopAnimation(idx);
+            argusBulkUpdateRowProgress(idx, 70, 'Enrichissement terminé', '#f59e0b');
           })
           .catch(err => {
+            argusBulkStopAnimation(idx);
             entry.phase = 'error';
             entry.status = 'error';
             entry.error = err.message;
+            argusBulkUpdateRowProgress(idx, 70, 'Erreur scan', '#dc2626');
             argusBulkUpdateRow(idx, entry);
           })
           .finally(() => {
             activeScans--;
-            completedScans++;
-            const pct = Math.round((completedScans / readyEntries.length) * 70);
-            document.getElementById('argus-bulk-progress-bar').style.width = (20 + pct) + '%';
-            document.querySelector('#bulk-stat-running .stat-val').textContent = activeScans;
-            tryLaunchNext();
-            if (activeScans === 0 && queueIdx >= readyEntries.length) resolve();
+            updateStats();
+            next();
+            if (activeScans === 0 && qi >= ready.length) resolve();
           });
       }
     }
-    tryLaunchNext();
-    if (readyEntries.length === 0) resolve();
+    next();
   });
 
-  // ══ PHASE C — récupération des findings, en parallèle (lecture DB seule) ══
-  argusBulkUpdateStatus('Phase 3/3 — Récupération des findings...');
+  // ══════════════════════════════
+  // PHASE C — récupération des findings, 100% parallèle (lecture DB seule)
+  // ══════════════════════════════
+  document.getElementById('argus-bulk-eta').textContent = 'Phase 3/3 — Récupération des findings...';
 
-  let doneCount = 0, errorCount = 0, totalFindings = 0;
+  const scanned = argusBulkEntries
+    .map((e, i) => ({ entry: e, idx: i }))
+    .filter(({ entry }) => entry.phase === 'scanned');
 
-  await Promise.all(argusBulkEntries.map(async (entry, i) => {
-    if (entry.phase !== 'scanned') {
-      if (entry.status === 'error') errorCount++;
-      return;
-    }
-    // argusScanFetch ne rejette jamais (voir argusScanStart) — Promise.all
-    // suffit, comme pour le scan individuel, pas besoin d'allSettled ici.
-    const [assetsRes, ghRes, breachRes, dnsRes, intelRes] = await Promise.all([
-      argusScanFetch(`/argus/assets?clientId=${entry.clientId}&scopeId=${entry.scopeId}`, {}, 15000),
-      argusScanFetch(`/argus/findings/github-leaks?clientId=${entry.clientId}&scopeId=${entry.scopeId}`, {}, 15000),
-      argusScanFetch(`/argus/findings/breaches?clientId=${entry.clientId}&scopeId=${entry.scopeId}`, {}, 15000, false),
-      argusScanFetch(`/argus/findings/dns?clientId=${entry.clientId}&scopeId=${entry.scopeId}`, {}, 15000, false),
-      argusScanFetch(`/argus/intel?clientId=${entry.clientId}&scopeId=${entry.scopeId}`, {}, 30000, false),
-    ]);
+  await Promise.all(scanned.map(async ({ entry, idx }) => {
+    argusBulkUpdateRowProgress(idx, 85, 'Findings...', '#00b4dc');
+    try {
+      const base = `?clientId=${entry.clientId}&scopeId=${entry.scopeId}`;
+      // argusScanFetch ne rejette jamais → Promise.all suffit (pas d'allSettled).
+      const [assetsRes, ghRes, breachRes, dnsRes, intelRes] = await Promise.all([
+        argusScanFetch('/argus/assets' + base, {}, 10000, false),
+        argusScanFetch('/argus/findings/github-leaks' + base, {}, 10000, false),
+        argusScanFetch('/argus/findings/breaches' + base, {}, 10000, false),
+        argusScanFetch('/argus/findings/dns' + base, {}, 10000, false),
+        argusScanFetch('/argus/intel' + base, {}, 10000, false),
+      ]);
 
-    if (!assetsRes.ok) {
+      const assets  = assetsRes.data?.data || [];
+      const ghF     = ghRes.data?.data || [];
+      const breachF = breachRes.data?.data || [];
+      const dnsF    = dnsRes.data?.data || [];
+      const intel   = intelRes.ok ? intelRes.data?.data || null : null;
+
+      const allF = [...ghF, ...breachF, ...dnsF];
+      entry.findings = allF.length;
+
+      // ghF (credentials exposés) porte `confidence`, pas `severity`.
+      const critCount = breachF.filter(f => f.severity === 'critical').length
+        + dnsF.filter(f => f.severity === 'critical').length
+        + ghF.filter(f => f.confidence === 'high').length;
+      const highCount = breachF.filter(f => f.severity === 'high').length
+        + dnsF.filter(f => f.severity === 'high').length
+        + ghF.filter(f => f.confidence === 'medium').length;
+      entry.score = critCount > 0 ? 'CRITIQUE' : highCount > 0 ? 'ÉLEVÉ' : entry.findings > 0 ? 'MOYEN' : 'OK';
+
+      entry.scanData = {
+        clientId: entry.clientId, scopeId: entry.scopeId,
+        companyName: entry.company, domain: entry.domain,
+        assets, findings: ghF, breaches: breachF, dnsFindings: dnsF, intel,
+        exposures: [], summary: {},
+      };
+      entry.status = 'done';
+      argusBulkUpdateRowProgress(idx, 100, 'Terminé ✓', '#16a34a');
+    } catch (err) {
+      argusBulkStopAnimation(idx);
       entry.status = 'error';
-      entry.error = assetsRes.data?.error || `Actifs: HTTP ${assetsRes.status}`;
-      errorCount++;
-      argusBulkUpdateRow(i, entry);
-      return;
+      entry.error = err.message;
+      argusBulkUpdateRowProgress(idx, 85, 'Erreur findings', '#dc2626');
     }
-
-    const assets = assetsRes.data?.data || [];
-    const ghF = ghRes.data?.data || [];
-    const breachF = breachRes.ok ? breachRes.data?.data || [] : [];
-    const dnsF = dnsRes.ok ? dnsRes.data?.data || [] : [];
-    const intel = intelRes.ok ? intelRes.data?.data || null : null;
-
-    const allF = [...ghF, ...breachF, ...dnsF];
-    entry.findings = allF.length;
-    totalFindings += entry.findings;
-
-    // ghF (credentials exposés) porte `confidence`, pas `severity` — voir
-    // argusBuildPdfReportHtml (openFindings.filter(f => f.confidence === ...)).
-    const critCount = breachF.filter(f => f.severity === 'critical').length
-      + dnsF.filter(f => f.severity === 'critical').length
-      + ghF.filter(f => f.confidence === 'high').length;
-    const highCount = breachF.filter(f => f.severity === 'high').length
-      + dnsF.filter(f => f.severity === 'high').length
-      + ghF.filter(f => f.confidence === 'medium').length;
-    entry.score = critCount > 0 ? 'CRITIQUE' : highCount > 0 ? 'ÉLEVÉ' : entry.findings > 0 ? 'MOYEN' : 'OK';
-
-    entry.scanData = {
-      clientId: entry.clientId, scopeId: entry.scopeId,
-      companyName: entry.company, domain: entry.domain,
-      assets, findings: ghF, breaches: breachF, dnsFindings: dnsF, intel,
-    };
-    entry.status = 'done';
-    doneCount++;
-    argusBulkUpdateRow(i, entry);
+    argusBulkUpdateRow(idx, entry);
+    updateStats();
   }));
 
   document.getElementById('argus-bulk-progress-bar').style.width = '100%';
-  document.querySelector('#bulk-stat-done .stat-val').textContent = doneCount;
-  document.querySelector('#bulk-stat-error .stat-val').textContent = errorCount;
-  document.querySelector('#bulk-stat-running .stat-val').textContent = '0';
-  document.querySelector('#bulk-stat-findings .stat-val').textContent = totalFindings;
-
-  const elapsed = Math.floor((Date.now() - startTime) / 1000);
-  const mm = Math.floor(elapsed / 60), ss = elapsed % 60;
-  argusBulkUpdateStatus(`✓ Terminé en ${mm}min${ss}s — ${doneCount}/${argusBulkEntries.length} réussis`);
+  updateStats();
 
   argusBulkRunning = false;
   btn.textContent = '▶ Relancer';
   btn.disabled = false;
+
+  const done = argusBulkEntries.filter(e => e.status === 'done').length;
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  document.getElementById('argus-bulk-eta').textContent =
+    `✓ Terminé en ${Math.floor(elapsed / 60)}min ${elapsed % 60}s — ${done}/${total} réussis`;
 }
 
-// ── Rapport détaillé / PDF / proposition pentest — un jeu de boutons par ligne ──
-// Réutilisent les fonctions du scan unitaire (argusRenderScanReport,
-// argusGeneratePDFReport, argusGeneratePentestProposal), qui lisent toutes le
-// global argusLastScanData — on y injecte les données de la société ciblée.
-function argusBulkViewReport(idx) {
-  const entry = argusBulkEntries[idx];
-  if (!entry || !entry.scanData) return;
-  const d = entry.scanData;
-  argusLastScanData = d;
-  // entry.scanData (voir sa construction plus haut) ne porte pas exposures /
-  // summary / clientStatus / githubTimedOutAssets — passés vides pour ne jamais
-  // planter argusRenderScanReport (qui itère exposures sans garde).
-  argusRenderScanReport({
-    companyName: d.companyName, domain: d.domain, scopeId: d.scopeId, clientId: d.clientId,
-    assets: d.assets || [], exposures: d.exposures || [], findings: d.findings || [],
-    summary: d.summary || {}, clientStatus: d.clientStatus,
-    githubTimedOutAssets: d.githubTimedOutAssets || [],
-    intel: d.intel || null, breaches: d.breaches || [], dnsFindings: d.dnsFindings || [],
-  });
-  setTimeout(() => {
-    const report = document.getElementById('argus-report');
-    if (report) {
-      report.style.display = 'block';
-      report.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, 200);
-}
-
+// ── PDF par ligne — seule action conservée dans le tableau bulk ──
+// Réutilise le générateur du scan unitaire (argusGeneratePDFReport), qui lit le
+// global argusLastScanData : on y injecte les données de la société ciblée, en
+// garantissant les clés que le générateur suppose présentes (exposures/summary
+// notamment — absentes de entry.scanData, ce qui faisait planter le PDF bulk).
 function argusBulkGeneratePDF(idx) {
   const entry = argusBulkEntries[idx];
   if (!entry || !entry.scanData) return;
-  argusLastScanData = entry.scanData;
-  argusGeneratePDFReport();
-}
 
-async function argusBulkGenerateProposal(idx) {
-  const entry = argusBulkEntries[idx];
-  if (!entry || !entry.scanData) return;
+  const btn = document.getElementById('bulk-pdf-btn-' + idx);
+  if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
 
-  const btn = document.getElementById('bulk-proposal-btn-' + idx);
-  if (btn) {
-    btn.textContent = '⏳ Génération...';
-    btn.disabled = true;
-  }
+  argusLastScanData = {
+    ...entry.scanData,
+    exposures: entry.scanData.exposures || [],
+    summary: entry.scanData.summary || {},
+    assets: entry.scanData.assets || [],
+    findings: entry.scanData.findings || [],
+    breaches: entry.scanData.breaches || [],
+    dnsFindings: entry.scanData.dnsFindings || [],
+    intel: entry.scanData.intel || {},
+  };
 
-  try {
-    argusLastScanData = entry.scanData;
-    await argusGeneratePentestProposal();
-  } catch (err) {
-    alert('Erreur génération proposition : ' + err.message);
-  } finally {
-    if (btn) {
-      btn.textContent = '🎯 Proposition';
-      btn.disabled = false;
+  setTimeout(() => {
+    try {
+      argusGeneratePDFReport();
+    } finally {
+      if (btn) { btn.textContent = '📄 PDF'; btn.disabled = false; }
     }
-  }
-}
-
-async function argusBulkGenerateWordReport(idx) {
-  const entry = argusBulkEntries[idx];
-  if (!entry || !entry.scanData) return;
-
-  const btn = document.getElementById('bulk-word-btn-' + idx);
-  if (btn) { btn.textContent = '⏳ Génération...'; btn.disabled = true; }
-
-  try {
-    argusLastScanData = entry.scanData;
-    await argusGenerateWordReport();
-  } catch (err) {
-    alert('Erreur génération rapport : ' + err.message);
-  } finally {
-    if (btn) { btn.textContent = '📝 Word'; btn.disabled = false; }
-  }
+  }, 100);
 }
 
 // Regroupe les external_assets (subdomain/certificate/service, une ligne par
