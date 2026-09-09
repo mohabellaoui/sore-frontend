@@ -863,6 +863,7 @@ select.form-input option{background:var(--surface)}
           <div class="tb-dropdown-item" onclick="nav('threatintel')" data-page="threatintel"><span class="tb-icon">🛰</span><span>Threat Intel</span></div>
           <div class="tb-dropdown-item" onclick="nav('atlas')" data-page="atlas"><span class="tb-icon">🗺</span><span>ATLAS</span></div>
           <div class="tb-dropdown-item" onclick="nav('argus')" data-page="argus"><span class="tb-icon">🎯</span><span>Exposition</span></div>
+          <div class="tb-dropdown-item" onclick="nav('activescan')" data-page="activescan"><span class="tb-icon">🛡</span><span>Scan Actif</span></div>
         </div>
       </div>
 
@@ -2045,6 +2046,77 @@ select.form-input option{background:var(--surface)}
       </div>
     </div>
 
+    <!-- ══ Scan Actif — vérification active autorisée (complément du scan passif) ══
+         Libellé client : "Scan Actif" uniquement. Le contrôle réel (autorisation
+         active + fenêtre de test qui couvre l'instant présent) est 100 % backend :
+         le bouton "Lancer le scan" n'est qu'un garde-fou d'UX, il ne recalcule ni
+         ne persiste aucun statut. Sélecteur de client identique à l'onglet
+         Exposition ; lecture seule pour le rôle client. -->
+    <div class="page" id="page-activescan">
+      <div class="section-header">
+        <div><div class="section-title">Scan Actif</div><div class="section-sub">Vérification active sous mandat — périmètre &amp; fenêtre de test bornés · complément du scan passif</div></div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <select class="form-input" id="activescan-client-select" style="display:none;min-width:220px" onchange="onActiveScanClientChange()"></select>
+          <button class="action-btn" onclick="loadActiveScan()">↺ Actualiser</button>
+          <button class="action-btn primary" id="activescan-new-auth-btn" style="display:none" onclick="openActiveScanAuthModal()">+ Nouvelle autorisation</button>
+        </div>
+      </div>
+
+      <div id="activescan-hint" class="card" style="display:none">
+        <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim);padding:8px 0">Sélectionnez un client pour afficher ses autorisations et ses findings.</div>
+      </div>
+
+      <div id="activescan-body" style="display:none">
+        <div class="stats-grid">
+          <div class="stat-card cyan">
+            <div class="stat-label-top">Autorisations</div>
+            <div class="stat-val cyan" id="activescan-stat-total">—</div>
+            <div class="stat-sub">tous statuts</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label-top">Actives — fenêtre courante</div>
+            <div class="stat-val" id="activescan-stat-active" style="color:var(--green)">—</div>
+            <div class="stat-sub">couvrent l'instant présent</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label-top">Expirées / révoquées</div>
+            <div class="stat-val" id="activescan-stat-inactive" style="color:var(--text-dim)">—</div>
+            <div class="stat-sub">hors mandat</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label-top">Findings</div>
+            <div class="stat-val" id="activescan-stat-findings" style="color:var(--amber)">—</div>
+            <div class="stat-sub">total en base</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:20px">
+          <div class="section-header" style="margin-bottom:14px">
+            <div class="card-title" style="margin:0"><span class="dot" style="background:var(--cyan)"></span>Autorisations de scan</div>
+            <button class="action-btn primary" id="activescan-run-btn" style="display:none" onclick="launchActiveScan()">▶ Lancer le scan</button>
+          </div>
+          <div id="activescan-run-note" style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-bottom:10px;display:none"></div>
+          <div class="table-wrap"><table class="data-table" id="activescan-auth-table">
+            <thead><tr><th>Statut</th><th>Périmètre</th><th>Fenêtre de test</th><th>Expiration</th><th>Autorisé par</th></tr></thead>
+            <tbody id="activescan-auth-tbody"><tr><td colspan="5" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+          </table></div>
+        </div>
+
+        <div class="card" style="margin-top:20px">
+          <div class="section-header" style="margin-bottom:14px">
+            <div class="card-title" style="margin:0"><span class="dot" style="background:var(--amber)"></span>Findings</div>
+            <select class="form-input" id="activescan-findings-scan" style="width:auto" onchange="renderActiveScanFindingsTable()">
+              <option value="">Tous les scans</option>
+            </select>
+          </div>
+          <div class="table-wrap"><table class="data-table" id="activescan-findings-table">
+            <thead><tr><th>Sévérité</th><th>Actif concerné</th><th>Description</th><th>Emplacement</th><th>Statut</th><th>Date</th></tr></thead>
+            <tbody id="activescan-findings-tbody"><tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+          </table></div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /main -->
 </div><!-- /app -->
 
@@ -2294,6 +2366,7 @@ function nav(page) {
   if (page === 'chronicle') loadChronicle();
   if (page === 'augur') loadAugur();
   if (page === 'scout') loadScout();
+  if (page === 'activescan') loadActiveScan();
   if (page === 'threatintel') loadThreatIntel();
 }
 
@@ -10103,6 +10176,355 @@ async function scoutUpdateStatus(status) {
   const id = scoutCurrentId;
   await openScoutOpportunity(id);   // rafraîchit la vue détail
   await loadScoutOpportunities();   // et la liste sous-jacente
+}
+
+// ════════════════════════════════════════════
+// SCAN ACTIF — vérification active autorisée (complément du scan passif)
+//
+// Libellé "Scan Actif" partout côté client. Le module backend porte un nom
+// interne (même règle de confidentialité vendor que pour l'IA) qui n'apparaît
+// nulle part ici — hors le chemin réel des routes /api/perseus/scan,
+// /perseus/authorizations et /perseus/findings, qui EST l'URL du serveur.
+//
+// Le backend reste la SEULE source de vérité : POST /perseus/scan revérifie
+// systématiquement qu'une autorisation status='active' couvre l'instant courant
+// (sinon 403 { code:'NO_ACTIVE_AUTHORIZATION' }). activeScanAuthCoversNow()
+// ci-dessous ne fait qu'activer/désactiver le bouton "Lancer le scan" — aucun
+// statut n'est recalculé ni réécrit côté client.
+//
+// Les GET résolvent le tenant depuis le JWT pour le rôle 'client' ;
+// admin/analyst passent ?clientId= (même sélecteur que l'onglet Exposition).
+// Aucune route ne mute le statut d'une autorisation : pas d'activation ni de
+// révocation depuis l'UI, donc pas de bouton "Révoquer".
+// ════════════════════════════════════════════
+let activeScanClientsCache = [];
+let activeScanSelectedClientId = '';
+let activeScanAuthorizations = [];
+let activeScanFindings = [];
+
+const ACTIVE_SCAN_EXCLUDABLE = [
+  { value: 'dos', label: 'Déni de service (DoS)' },
+  { value: 'destructive', label: 'Actions destructives' },
+  { value: 'brute-force', label: 'Brute force' },
+  { value: 'social_engineering', label: 'Ingénierie sociale' },
+];
+
+function activeScanCanManage() { return ['admin', 'analyst'].includes(currentUser?.role); }
+
+function activeScanClientParam() {
+  if (currentUser?.role === 'client') return '';
+  return activeScanSelectedClientId ? `clientId=${activeScanSelectedClientId}` : '';
+}
+
+// PURE — reflète getActiveAuthorization() côté backend : status 'active',
+// expires_at non dépassé, now ∈ [testing_window.start, testing_window.end].
+// Sert uniquement à l'état activé/désactivé du bouton "Lancer le scan" ;
+// n'écrit rien, ne remplace pas le contrôle backend.
+function activeScanAuthCoversNow(auth, now = new Date()) {
+  if (!auth || auth.status !== 'active') return false;
+  const t = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  if (Number.isNaN(t)) return false;
+  if (auth.expires_at && new Date(auth.expires_at).getTime() <= t) return false;
+  const win = auth.testing_window || {};
+  if (win.start && new Date(win.start).getTime() > t) return false;
+  if (win.end && new Date(win.end).getTime() < t) return false;
+  return true;
+}
+
+function activeScanHasCoveringAuth(list, now = new Date()) {
+  return (list || []).some(a => activeScanAuthCoversNow(a, now));
+}
+
+function activeScanAuthStatusBadge(status) {
+  const cfg = {
+    active:  { color: 'var(--green)',    bg: 'var(--green-dim)',      label: 'Active' },
+    pending: { color: 'var(--amber)',    bg: 'var(--amber-dim)',      label: 'En attente' },
+    expired: { color: 'var(--text-dim)', bg: 'rgba(120,130,140,.12)', label: 'Expirée' },
+    revoked: { color: 'var(--red)',      bg: 'var(--red-dim)',        label: 'Révoquée' },
+  }[status] || { color: 'var(--text-dim)', bg: 'rgba(120,130,140,.12)', label: status || '—' };
+  return `<span style="background:${cfg.bg};color:${cfg.color};border:1px solid ${cfg.color};
+    border-radius:4px;padding:2px 8px;font-size:10px;font-family:var(--font-mono);text-transform:uppercase">${escHtml(cfg.label)}</span>`;
+}
+
+const ACTIVE_SCAN_FINDING_STATUS_LABELS = {
+  new: 'Nouveau', confirmed: 'Confirmé', false_positive: 'Faux positif', remediated: 'Corrigé',
+};
+function activeScanFindingStatusBadge(status) {
+  const cfg = {
+    new:            { color: 'var(--cyan)',     bg: 'var(--cyan-dim)' },
+    confirmed:      { color: 'var(--red)',      bg: 'var(--red-dim)' },
+    false_positive: { color: 'var(--text-dim)', bg: 'rgba(120,130,140,.12)' },
+    remediated:     { color: 'var(--green)',    bg: 'var(--green-dim)' },
+  }[status] || { color: 'var(--text-dim)', bg: 'rgba(120,130,140,.12)' };
+  return `<span style="background:${cfg.bg};color:${cfg.color};border:1px solid ${cfg.color};
+    border-radius:4px;padding:2px 8px;font-size:10px;font-family:var(--font-mono);text-transform:uppercase">${escHtml(ACTIVE_SCAN_FINDING_STATUS_LABELS[status] || status || '—')}</span>`;
+}
+
+function activeScanSeverityBadge(sev) {
+  const s = String(sev || 'info').toLowerCase();
+  const cls = ['critical', 'high', 'medium', 'low', 'info'].includes(s) ? s : 'info';
+  return `<span class="sev-badge ${cls}">${escHtml(s.toUpperCase())}</span>`;
+}
+
+function activeScanFmtWindow(win) {
+  win = win || {};
+  if (!win.start && !win.end) return '<span style="color:var(--text-dim)">—</span>';
+  const f = iso => { const d = new Date(iso); return isNaN(d) ? '—' : d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); };
+  return `<span style="font-family:var(--font-mono);font-size:11px">${f(win.start)} → ${f(win.end)}</span>`;
+}
+
+function activeScanFmtDate(iso) {
+  if (!iso) return '<span style="color:var(--text-dim)">—</span>';
+  const d = new Date(iso);
+  if (isNaN(d)) return '<span style="color:var(--text-dim)">—</span>';
+  return d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+async function loadActiveScan() {
+  const selectEl = document.getElementById('activescan-client-select');
+  const hint = document.getElementById('activescan-hint');
+  const bodyEl = document.getElementById('activescan-body');
+  const newBtn = document.getElementById('activescan-new-auth-btn');
+
+  newBtn.style.display = activeScanCanManage() ? '' : 'none';
+
+  if (activeScanCanManage()) {
+    if (!activeScanClientsCache.length) {
+      const res = await apiCall('/clients?limit=100');
+      activeScanClientsCache = res?.data || [];
+    }
+    selectEl.style.display = '';
+    selectEl.innerHTML = `<option value="">— Sélectionner un client —</option>${activeScanClientsCache.map(c => `<option value="${c.id}" ${c.id === activeScanSelectedClientId ? 'selected' : ''}>${escHtml(c.name)}</option>`).join('')}`;
+    if (!activeScanSelectedClientId) {
+      hint.style.display = 'block';
+      bodyEl.style.display = 'none';
+      newBtn.style.display = 'none';
+      return;
+    }
+  } else {
+    selectEl.style.display = 'none';
+  }
+
+  hint.style.display = 'none';
+  bodyEl.style.display = 'block';
+  await Promise.all([refreshActiveScanAuthorizations(), refreshActiveScanFindings()]);
+}
+
+function onActiveScanClientChange() {
+  activeScanSelectedClientId = document.getElementById('activescan-client-select').value;
+  loadActiveScan();
+}
+
+async function refreshActiveScanAuthorizations() {
+  const qs = activeScanClientParam();
+  const res = await apiCall(`/perseus/authorizations${qs ? '?' + qs : ''}`);
+  activeScanAuthorizations = res?.data || [];
+  renderActiveScanAuthTable();
+  renderActiveScanRunControl();
+}
+
+function renderActiveScanAuthTable() {
+  const tbody = document.getElementById('activescan-auth-tbody');
+  const list = activeScanAuthorizations;
+  const now = new Date();
+
+  document.getElementById('activescan-stat-total').textContent = list.length;
+  document.getElementById('activescan-stat-active').textContent = list.filter(a => activeScanAuthCoversNow(a, now)).length;
+  document.getElementById('activescan-stat-inactive').textContent = list.filter(a => a.status === 'expired' || a.status === 'revoked').length;
+
+  if (!list.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune autorisation${activeScanCanManage() ? ' — créez-en une' : ''}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  list.forEach(a => {
+    const scope = Array.isArray(a.scope) ? a.scope : [];
+    const covers = activeScanAuthCoversNow(a, now);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="white-space:nowrap">${activeScanAuthStatusBadge(a.status)}${covers ? ' <span style="color:var(--green);font-size:10px;font-family:var(--font-mono)">● en fenêtre</span>' : ''}</td>
+      <td style="font-family:var(--font-mono);font-size:11px">${scope.map(s => escHtml(s)).join('<br>') || '—'}</td>
+      <td>${activeScanFmtWindow(a.testing_window)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${activeScanFmtDate(a.expires_at)}</td>
+      <td style="font-size:12px">${escHtml(a.authorized_by || '—')}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderActiveScanRunControl() {
+  const btn = document.getElementById('activescan-run-btn');
+  const note = document.getElementById('activescan-run-note');
+  if (!activeScanCanManage()) { btn.style.display = 'none'; note.style.display = 'none'; return; }
+
+  const covered = activeScanHasCoveringAuth(activeScanAuthorizations);
+  btn.style.display = '';
+  btn.disabled = !covered;
+  btn.style.opacity = covered ? '' : '0.5';
+  btn.style.cursor = covered ? '' : 'not-allowed';
+  note.style.display = covered ? 'none' : 'block';
+  note.textContent = covered ? '' : "Aucune autorisation active ne couvre l'instant présent — le scan serait refusé par le serveur.";
+}
+
+async function launchActiveScan() {
+  if (!activeScanCanManage()) return;
+  if (!activeScanSelectedClientId) { showToast('⚠ Sélectionnez un client'); return; }
+  if (!confirm("Lancer une vérification active sous mandat sur le périmètre autorisé ?\n\nCette action envoie de vraies requêtes de test vers l'infrastructure du client, dans les limites de l'autorisation en vigueur.")) return;
+
+  const btn = document.getElementById('activescan-run-btn');
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ Scan en cours…';
+
+  const res = await apiCallEx('/perseus/scan', { method: 'POST', body: JSON.stringify({ clientId: activeScanSelectedClientId }) });
+
+  btn.textContent = label; btn.disabled = false;
+
+  if (!res.ok) {
+    if (res.data?.code === 'NO_ACTIVE_AUTHORIZATION') {
+      showToast("⛔ Scan refusé : aucune autorisation active et dans sa fenêtre de test pour ce client. Activez ou créez une autorisation couvrant l'instant présent.");
+    } else {
+      showToast('❌ ' + (res.error || 'Échec du lancement du scan'));
+    }
+    renderActiveScanRunControl();
+    return;
+  }
+
+  const summary = res.data?.data || {};
+  if (summary.note) {
+    showToast('ℹ ' + summary.note);
+  } else {
+    showToast(`✅ Scan terminé — ${summary.findingsCount ?? 0} finding(s) sur ${(summary.targets || []).length} cible(s)${summary.timedOut ? ' (timeout)' : ''}`);
+  }
+  await refreshActiveScanFindings();
+  await refreshActiveScanAuthorizations();
+}
+
+async function refreshActiveScanFindings() {
+  const qs = activeScanClientParam();
+  const res = await apiCall(`/perseus/findings${qs ? '?' + qs : ''}`);
+  activeScanFindings = res?.data || [];
+  document.getElementById('activescan-stat-findings').textContent = activeScanFindings.length;
+
+  const sel = document.getElementById('activescan-findings-scan');
+  const prev = sel.value;
+  const scanIds = [...new Set(activeScanFindings.map(f => f.scan_id).filter(Boolean))];
+  sel.innerHTML = `<option value="">Tous les scans</option>${scanIds.map(id => `<option value="${escHtml(id)}">${escHtml(String(id).slice(0, 8))}…</option>`).join('')}`;
+  if (scanIds.includes(prev)) sel.value = prev;
+
+  renderActiveScanFindingsTable();
+}
+
+function renderActiveScanFindingsTable() {
+  const tbody = document.getElementById('activescan-findings-tbody');
+  const scanFilter = document.getElementById('activescan-findings-scan')?.value || '';
+  const rows = activeScanFindings.filter(f => !scanFilter || f.scan_id === scanFilter);
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun finding</td></tr>`;
+    return;
+  }
+  const order = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+  tbody.innerHTML = '';
+  [...rows].sort((a, b) => (order[a.severity] ?? 5) - (order[b.severity] ?? 5)).forEach(f => {
+    const tr = document.createElement('tr');
+    const desc = f.name || f.details?.description || f.template_id || '—';
+    tr.innerHTML = `
+      <td>${activeScanSeverityBadge(f.severity)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-bright)">${escHtml(f.target || '—')}</td>
+      <td style="font-size:12px">${escHtml(desc)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);word-break:break-all">${escHtml(f.matched_at || '—')}</td>
+      <td>${activeScanFindingStatusBadge(f.status)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);white-space:nowrap">${activeScanFmtDate(f.discovered_at)}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// ── Nouvelle autorisation (admin/analyst) ────────────────────────────────
+function openActiveScanAuthModal() {
+  if (!activeScanCanManage()) return;
+  if (!activeScanSelectedClientId) { showToast("⚠ Sélectionnez d'abord un client"); return; }
+  const modal = document.createElement('div');
+  modal.id = 'activescan-auth-overlay';
+  modal.style.cssText = `position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;`;
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;max-width:560px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="closeActiveScanAuthModal()" style="position:absolute;top:16px;right:16px;background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:24px">NOUVELLE AUTORISATION DE SCAN</div>
+
+      <div class="form-group"><label class="form-label">Périmètre autorisé — un domaine ou une IP par ligne *</label>
+        <textarea class="form-input" id="activescan-f-scope" rows="4" placeholder="exemple-client.ma&#10;api.exemple-client.ma&#10;203.0.113.10"></textarea></div>
+
+      <div class="form-group"><label class="form-label">Autorisé par — nom &amp; fonction du signataire *</label>
+        <input class="form-input" id="activescan-f-authby" placeholder="Ex. J. Dupont, RSSI"/></div>
+
+      <div style="display:flex;gap:12px">
+        <div class="form-group" style="flex:1"><label class="form-label">Début de la fenêtre de test *</label>
+          <input class="form-input" id="activescan-f-winstart" type="datetime-local"/></div>
+        <div class="form-group" style="flex:1"><label class="form-label">Fin de la fenêtre de test *</label>
+          <input class="form-input" id="activescan-f-winend" type="datetime-local"/></div>
+      </div>
+
+      <div class="form-group"><label class="form-label">Expiration du mandat *</label>
+        <input class="form-input" id="activescan-f-expires" type="datetime-local"/></div>
+
+      <div class="form-group"><label class="form-label">Actions exclues du mandat</label>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;font-family:var(--font-mono);font-size:11px;color:var(--text)">
+          ${ACTIVE_SCAN_EXCLUDABLE.map(x => `<label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" class="activescan-f-excl" value="${x.value}"/> ${escHtml(x.label)}</label>`).join('')}
+        </div></div>
+
+      <div class="form-group"><label class="form-label">Statut initial</label>
+        <select class="form-input" id="activescan-f-status">
+          <option value="pending">En attente — activation ultérieure</option>
+          <option value="active">Active immédiatement</option>
+        </select></div>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:20px;margin-top:8px">
+        <button class="action-btn" onclick="closeActiveScanAuthModal()">Annuler</button>
+        <button class="action-btn primary" id="activescan-auth-save-btn" onclick="submitActiveScanAuth()">Créer l'autorisation</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  document.getElementById('activescan-f-scope').focus();
+}
+
+function closeActiveScanAuthModal() {
+  document.getElementById('activescan-auth-overlay')?.remove();
+}
+
+async function submitActiveScanAuth() {
+  const scope = document.getElementById('activescan-f-scope').value.split('\n').map(s => s.trim()).filter(Boolean);
+  const authorizedBy = document.getElementById('activescan-f-authby').value.trim();
+  const winStart = document.getElementById('activescan-f-winstart').value;
+  const winEnd = document.getElementById('activescan-f-winend').value;
+  const expiresAt = document.getElementById('activescan-f-expires').value;
+
+  if (!scope.length) { showToast('⚠ Au moins une entrée de périmètre est requise'); return; }
+  if (!authorizedBy) { showToast('⚠ Le nom du signataire est requis'); return; }
+  if (!winStart || !winEnd || !expiresAt) { showToast('⚠ Fenêtre de test et expiration requises'); return; }
+  if (new Date(winEnd) <= new Date(winStart)) { showToast('⚠ La fin de fenêtre doit suivre le début'); return; }
+
+  const excludedActions = [...document.querySelectorAll('.activescan-f-excl:checked')].map(c => c.value);
+  const body = {
+    clientId: activeScanSelectedClientId,
+    scope,
+    authorizedBy,
+    excludedActions,
+    expiresAt: new Date(expiresAt).toISOString(),
+    testingWindow: { start: new Date(winStart).toISOString(), end: new Date(winEnd).toISOString() },
+    status: document.getElementById('activescan-f-status').value,
+  };
+
+  const btn = document.getElementById('activescan-auth-save-btn');
+  btn.disabled = true; btn.textContent = 'Création…';
+  const res = await apiCallEx('/perseus/authorizations', { method: 'POST', body: JSON.stringify(body) });
+  btn.disabled = false; btn.textContent = "Créer l'autorisation";
+
+  if (!res.ok) {
+    showToast('⚠ ' + (res.error || "Erreur lors de la création de l'autorisation"));
+    return;
+  }
+  closeActiveScanAuthModal();
+  showToast('✅ Autorisation créée' + (body.status === 'active' ? ' et activée' : " (en attente d'activation)"));
+  await refreshActiveScanAuthorizations();
 }
 
 let toastTimer;
