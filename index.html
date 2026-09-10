@@ -427,6 +427,16 @@ table.data-table tr:hover td{background:rgba(0,180,220,.03)}
 .status-pill.dormant{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(255,170,0,.25)}
 .status-pill.orphaned{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,45,85,.25)}
 .status-pill.disabled{background:rgba(120,130,140,.12);color:var(--text-dim);border:1px solid rgba(120,130,140,.25)}
+/* ── HELIOS — connexion cloud (not_configured/connected/error/revoked) + run (pending/running/succeeded/partial/failed) + finding (new/confirmed/false_positive/remediated déjà définis) ── */
+.status-pill.not_configured{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(255,170,0,.25)}
+.status-pill.connected{background:var(--green-dim);color:var(--green);border:1px solid rgba(0,255,136,.25)}
+.status-pill.error{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,45,85,.25)}
+.status-pill.revoked{background:rgba(120,130,140,.12);color:var(--text-dim);border:1px solid rgba(120,130,140,.25)}
+.status-pill.pending{background:var(--cyan-dim);color:var(--cyan);border:1px solid rgba(0,180,220,.25)}
+.status-pill.succeeded{background:var(--green-dim);color:var(--green);border:1px solid rgba(0,255,136,.25)}
+.status-pill.partial{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(255,170,0,.25)}
+.status-pill.new{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(255,170,0,.25)}
+.status-pill.confirmed{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,45,85,.25)}
 
 /* ── SOC correlation badge (ARGUS) — l'info la plus critique du module, mise en évidence forte ── */
 .soc-corr-badge{
@@ -864,6 +874,7 @@ select.form-input option{background:var(--surface)}
           <div class="tb-dropdown-item" onclick="nav('atlas')" data-page="atlas"><span class="tb-icon">🗺</span><span>ATLAS</span></div>
           <div class="tb-dropdown-item" onclick="nav('argus')" data-page="argus"><span class="tb-icon">🎯</span><span>Exposition</span></div>
           <div class="tb-dropdown-item" onclick="nav('activescan')" data-page="activescan"><span class="tb-icon">🛡</span><span>Scan Actif</span></div>
+          <div class="tb-dropdown-item" onclick="nav('helios')" data-page="helios"><span class="tb-icon">☁</span><span>CSPM Cloud</span></div>
         </div>
       </div>
 
@@ -2117,6 +2128,81 @@ select.form-input option{background:var(--surface)}
       </div>
     </div>
 
+    <!-- ══ HELIOS — CSPM Cloud (Pôle AEGIS) ══ -->
+    <div class="page" id="page-helios">
+      <div class="section-header">
+        <div><div class="section-title">HELIOS — CSPM Cloud</div><div class="section-sub">Posture de sécurité cloud (AWS) via Prowler — mauvaises configurations, IAM, chiffrement, conformité · Pôle AEGIS</div></div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <select class="form-input" id="helios-client-select" style="display:none;min-width:220px" onchange="onHeliosClientChange()"></select>
+          <button class="action-btn" onclick="loadHeliosPage()">↺ Actualiser</button>
+        </div>
+      </div>
+
+      <div id="helios-client-hint" class="card" style="display:none;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">
+        Sélectionnez un client ci-dessus pour voir ses connexions cloud et ses findings.
+      </div>
+
+      <div id="helios-body" style="display:none">
+        <!-- Connexions -->
+        <div class="card">
+          <div class="section-header" style="margin-bottom:14px">
+            <div class="card-title" style="margin:0"><span class="dot" style="background:var(--cyan)"></span>Connexions cloud</div>
+            <button class="action-btn primary" id="helios-add-conn-btn" style="display:none" onclick="openHeliosConnModal()">+ Ajouter une connexion AWS</button>
+          </div>
+          <div class="table-wrap"><table class="data-table" id="helios-conn-table">
+            <thead><tr><th>Nom</th><th>Provider</th><th>Compte</th><th>Statut</th><th>Dernier scan</th><th></th></tr></thead>
+            <tbody id="helios-conn-tbody"><tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+          </table></div>
+          <div id="helios-conn-scan-error-banner" style="display:none;background:var(--red-dim);border:1px solid var(--red);border-radius:4px;padding:12px;margin-top:14px;color:var(--red);font-size:12px;font-family:var(--font-mono);line-height:1.5"></div>
+        </div>
+
+        <!-- Roadmap Azure / GCP — cosmétique, non implémenté côté backend -->
+        <div class="card" style="margin-top:20px;opacity:.65">
+          <div class="card-title"><span class="dot" style="background:var(--text-dim)"></span>Microsoft Azure <span class="status-pill draft" style="margin-left:10px">Bientôt disponible</span></div>
+          <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Connecteur CSPM Azure (subscription + service principal read-only). Enum backend prêt, connecteur en roadmap.</div>
+        </div>
+        <div class="card" style="margin-top:20px;opacity:.65">
+          <div class="card-title"><span class="dot" style="background:var(--text-dim)"></span>Google Cloud Platform <span class="status-pill draft" style="margin-left:10px">Bientôt disponible</span></div>
+          <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Connecteur CSPM GCP (service account read-only). Enum backend prêt, connecteur en roadmap.</div>
+        </div>
+
+        <!-- Findings -->
+        <div class="card" style="margin-top:20px">
+          <div class="section-header" style="margin-bottom:14px">
+            <div class="card-title" style="margin:0"><span class="dot" style="background:var(--amber)"></span>Findings CSPM</div>
+            <div style="display:flex;gap:10px">
+              <select class="form-input" id="helios-f-severity" onchange="loadHeliosFindings()" style="width:auto">
+                <option value="">Toutes sévérités</option>
+                <option value="critical">Critical</option><option value="high">High</option>
+                <option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option>
+              </select>
+              <select class="form-input" id="helios-f-status" onchange="loadHeliosFindings()" style="width:auto">
+                <option value="">Tous statuts</option>
+                <option value="new">New</option><option value="confirmed">Confirmed</option>
+                <option value="false_positive">False positive</option><option value="remediated">Remediated</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-wrap"><table class="data-table" id="helios-findings-table">
+            <thead><tr><th>Contrôle</th><th>Sévérité</th><th>Ressource</th><th>Statut</th><th>Détecté le</th><th></th></tr></thead>
+            <tbody id="helios-findings-tbody"><tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+          </table></div>
+        </div>
+
+        <!-- Historique des runs -->
+        <div class="card" style="margin-top:20px">
+          <div class="section-header" style="margin-bottom:14px">
+            <div class="card-title" style="margin:0"><span class="dot" style="background:var(--cyan)"></span>Historique des scans</div>
+            <button class="action-btn" onclick="loadHeliosRuns()">↺ Actualiser</button>
+          </div>
+          <div class="table-wrap"><table class="data-table" id="helios-runs-table">
+            <thead><tr><th>Statut</th><th>Déclenché par</th><th>Démarré</th><th>Terminé</th><th>Erreur</th></tr></thead>
+            <tbody id="helios-runs-tbody"><tr><td colspan="5" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+          </table></div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /main -->
 </div><!-- /app -->
 
@@ -2352,6 +2438,11 @@ function nav(page) {
   // l'item de menu lui-même (invisible une fois le menu refermé) porterait .active.
   navEl?.closest('.tb-dropdown')?.querySelector('.tb-dropdown-btn')?.classList.add('active');
   closeAllTbDropdowns();
+  // HELIOS : arrête le polling des runs dès qu'on quitte l'onglet (aucun autre
+  // onglet n'a de timer lié à la visibilité — les setInterval ARGUS sont liés
+  // au cycle d'un scan, pas à la page — donc pas de pattern existant à copier,
+  // on nettoie explicitement ici). `heliosStopPolling` est hoistée (function).
+  if (page !== 'helios') heliosStopPolling();
   if (page === 'soc') loadSOC();
   if (page === 'dashboard') loadDashboard();
   if (page === 'logs') loadLogs();
@@ -2367,6 +2458,7 @@ function nav(page) {
   if (page === 'augur') loadAugur();
   if (page === 'scout') loadScout();
   if (page === 'activescan') loadActiveScan();
+  if (page === 'helios') loadHeliosPage();
   if (page === 'threatintel') loadThreatIntel();
 }
 
@@ -10525,6 +10617,405 @@ async function submitActiveScanAuth() {
   closeActiveScanAuthModal();
   showToast('✅ Autorisation créée' + (body.status === 'active' ? ' et activée' : " (en attente d'activation)"));
   await refreshActiveScanAuthorizations();
+}
+
+// ════════════════════════════════════════════
+// HELIOS — CSPM Cloud (Pôle AEGIS)
+// ════════════════════════════════════════════
+// L'exécution Prowler vit dans un job GitHub Actions quotidien SÉPARÉ (backend :
+// helios-runner/). Le frontend n'orchestre que la connexion BYOK, la mise en
+// file d'un scan et la lecture des findings/runs. Un run évolue en tâche de
+// fond (pending → running → succeeded/partial/failed) : refresh manuel +
+// polling léger tant qu'un run est en cours ET que l'onglet est visible.
+
+let heliosSelectedClientId = '';
+let heliosClientsCache = [];
+let heliosConnectionsCache = [];
+let heliosFindingsCache = [];
+let heliosRunsCache = [];
+let heliosPollTimer = null;
+
+// Fetch dédié HELIOS — même contrat que janusFetch ({ ok, status, data }).
+async function heliosFetch(path, options = {}, timeoutMs = 30000) {
+  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+  try {
+    const res = await fetch(`${API}${path}`, { ...options, headers, signal: AbortSignal.timeout(timeoutMs) });
+    let data = null;
+    try { data = await res.json(); } catch { /* pas de corps JSON exploitable */ }
+    return { ok: res.ok, status: res.status, data };
+  } catch (e) {
+    return { ok: false, status: 0, data: null, networkError: true, timedOut: e.name === 'TimeoutError' };
+  }
+}
+
+function heliosCanManage() { return ['admin', 'analyst'].includes(currentUser?.role); }
+function heliosIsAdmin() { return currentUser?.role === 'admin'; }
+// Rôle client : jamais de clientId envoyé, le backend dérive le tenant (resolveTenantScope).
+function heliosClientParam() {
+  if (currentUser?.role === 'client') return '';
+  return heliosSelectedClientId ? `clientId=${heliosSelectedClientId}` : '';
+}
+function heliosQs(extra) {
+  const parts = [heliosClientParam(), ...(extra || [])].filter(Boolean);
+  return parts.length ? '?' + parts.join('&') : '';
+}
+
+const HELIOS_PROVIDER_LABELS = { aws: 'AWS', azure: 'Azure', gcp: 'GCP' };
+
+async function loadHeliosPage() {
+  const selectEl = document.getElementById('helios-client-select');
+  const addBtn = document.getElementById('helios-add-conn-btn');
+  const hintEl = document.getElementById('helios-client-hint');
+  const bodyEl = document.getElementById('helios-body');
+
+  if (heliosCanManage()) {
+    if (!heliosClientsCache.length) {
+      const res = await apiCall('/clients?limit=100');
+      heliosClientsCache = res?.data || [];
+    }
+    selectEl.style.display = '';
+    selectEl.innerHTML = `<option value="">— Sélectionner un client —</option>` +
+      heliosClientsCache.map(c => `<option value="${c.id}" ${c.id === heliosSelectedClientId ? 'selected' : ''}>${escHtml(c.name)}</option>`).join('');
+    if (!heliosSelectedClientId) {
+      hintEl.style.display = '';
+      bodyEl.style.display = 'none';
+      heliosStopPolling();
+      return;
+    }
+  } else {
+    selectEl.style.display = 'none';
+  }
+
+  hintEl.style.display = 'none';
+  bodyEl.style.display = '';
+  // Le bouton d'ajout manipule des secrets client réels → admin STRICT (backend :
+  // requireRole('admin') seul sur POST /api/helios/connections).
+  addBtn.style.display = heliosIsAdmin() ? '' : 'none';
+
+  await Promise.all([loadHeliosConnections(), loadHeliosFindings(), loadHeliosRuns()]);
+}
+
+function onHeliosClientChange() {
+  heliosSelectedClientId = document.getElementById('helios-client-select').value;
+  heliosStopPolling();
+  loadHeliosPage();
+}
+
+// ── Connexions ─────────────────────────────────────────────────────────
+async function loadHeliosConnections() {
+  const res = await heliosFetch(`/helios/connections${heliosQs()}`, {}, 20000);
+  heliosConnectionsCache = (res.ok && Array.isArray(res.data?.data)) ? res.data.data : [];
+  renderHeliosConnections();
+}
+
+function renderHeliosConnections() {
+  const tbody = document.getElementById('helios-conn-tbody');
+  if (!heliosConnectionsCache.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune connexion cloud${heliosIsAdmin() ? ' — cliquez « + Ajouter une connexion AWS »' : ''}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  heliosConnectionsCache.forEach(c => {
+    const tr = document.createElement('tr');
+    const btns = [];
+    if (heliosCanManage() && c.status !== 'revoked') {
+      btns.push(`<button class="action-btn" style="padding:4px 10px;font-size:11px" onclick="heliosTriggerScan('${c.id}')">▶ Scanner</button>`);
+    }
+    if (heliosIsAdmin() && c.status !== 'revoked') {
+      btns.push(`<button class="action-btn" style="padding:4px 10px;font-size:11px;border-color:rgba(255,45,85,.4);color:var(--red)" onclick="heliosRevokeConn('${c.id}')">Révoquer</button>`);
+    }
+    const actions = btns.length ? `<div style="display:flex;gap:6px">${btns.join('')}</div>` : '—';
+    tr.innerHTML = `
+      <td>${escHtml(c.display_name)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px">${HELIOS_PROVIDER_LABELS[c.provider] || escHtml(c.provider)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${c.account_ref ? escHtml(c.account_ref) : '—'}</td>
+      <td><span class="status-pill ${c.status}">${escHtml((c.status || '').replace('_', ' '))}</span></td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${c.last_scan_at ? new Date(c.last_scan_at).toLocaleString('fr-FR') : 'Jamais'}${c.last_scan_status === 'error' ? ' <span style="color:var(--red)">⚠</span>' : ''}</td>
+      <td>${actions}</td>`;
+    tbody.appendChild(tr);
+  });
+  const errConn = heliosConnectionsCache.find(c => c.last_scan_status === 'error' && c.last_scan_error);
+  const banner = document.getElementById('helios-conn-scan-error-banner');
+  if (errConn) {
+    banner.style.display = '';
+    banner.textContent = `⚠ Dernier scan « ${errConn.display_name} » échoué : ${errConn.last_scan_error}`;
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
+async function heliosTriggerScan(connectionId) {
+  const res = await heliosFetch('/helios/runs', { method: 'POST', body: JSON.stringify({ connectionId }) }, 20000);
+  if (res.ok) {
+    showToast('✅ Scan mis en file — sera traité sous 24h (cron quotidien) ou immédiatement si un run manuel GitHub Actions est déclenché');
+    await loadHeliosRuns();
+    await loadHeliosConnections();
+    return;
+  }
+  if (res.status === 403 && res.data?.code === 'CLOUD_CONNECTION_NOT_SCANNABLE') {
+    showToast('⚠ Connexion révoquée — recréez une connexion pour pouvoir la scanner');
+    return;
+  }
+  showToast('⚠ ' + (res.data?.error || `Échec de la mise en file (HTTP ${res.status})`));
+}
+
+async function heliosRevokeConn(connectionId) {
+  const conn = heliosConnectionsCache.find(c => c.id === connectionId);
+  const name = conn ? conn.display_name : 'cette connexion';
+  if (!confirm(`Révoquer la connexion « ${name} » ? Elle ne pourra plus être scannée (l'historique des findings est conservé).`)) return;
+  const res = await heliosFetch(`/helios/connections/${connectionId}`, { method: 'DELETE' }, 15000);
+  if (!res.ok) { showToast('⚠ ' + (res.data?.error || `Échec de la révocation (HTTP ${res.status})`)); return; }
+  showToast('✅ Connexion révoquée');
+  await loadHeliosConnections();
+}
+
+// ── Modal : ajouter une connexion AWS (admin strict) ───────────────────
+function openHeliosConnModal() {
+  if (!heliosIsAdmin()) return;
+  if (!heliosSelectedClientId && currentUser?.role !== 'client') { showToast("⚠ Sélectionnez d'abord un client"); return; }
+  const modal = document.createElement('div');
+  modal.id = 'helios-conn-overlay';
+  modal.style.cssText = `position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;`;
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;max-width:560px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="closeHeliosConnModal()" style="position:absolute;top:16px;right:16px;background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:24px">NOUVELLE CONNEXION CLOUD — AWS</div>
+
+      <div class="form-group"><label class="form-label">Nom d'affichage *</label>
+        <input class="form-input" id="helios-f-dname" placeholder="Ex. Prod AWS — 1234-5678-9012" autocomplete="off"/></div>
+
+      <div class="form-group"><label class="form-label">Méthode d'authentification</label>
+        <div style="display:flex;flex-direction:column;gap:8px;font-family:var(--font-mono);font-size:12px;color:var(--text)">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="radio" name="helios-authmethod" value="assume_role" checked onchange="heliosToggleAuthFields()"/> Assume Role <span style="color:var(--text-dim)">(recommandé — pas de secret long terme)</span></label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="radio" name="helios-authmethod" value="access_keys" onchange="heliosToggleAuthFields()"/> Clés d'accès <span style="color:var(--text-dim)">(fallback)</span></label>
+        </div></div>
+
+      <div id="helios-fields-assume_role">
+        <div class="form-group"><label class="form-label">Role ARN *</label>
+          <input class="form-input" id="helios-f-rolearn" type="password" autocomplete="new-password" placeholder="arn:aws:iam::123456789012:role/SoreSecurity-HELIOS-…"/></div>
+        <div class="form-group"><label class="form-label">External ID *</label>
+          <input class="form-input" id="helios-f-extid" type="password" autocomplete="new-password" placeholder="Valeur secrète communiquée au client (jamais réaffichée)"/></div>
+      </div>
+
+      <div id="helios-fields-access_keys" style="display:none">
+        <div class="form-group"><label class="form-label">Access Key ID *</label>
+          <input class="form-input" id="helios-f-akid" type="password" autocomplete="new-password" placeholder="AKIA… / ASIA…"/></div>
+        <div class="form-group"><label class="form-label">Secret Access Key *</label>
+          <input class="form-input" id="helios-f-sak" type="password" autocomplete="new-password" placeholder="Valeur du secret (jamais réaffichée après envoi)"/></div>
+        <div class="form-group"><label class="form-label">Session Token <span style="color:var(--text-dim)">(optionnel)</span></label>
+          <input class="form-input" id="helios-f-stoken" type="password" autocomplete="new-password" placeholder="Si clé temporaire STS"/></div>
+      </div>
+
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);line-height:1.5;margin-bottom:16px">
+        La connexion est créée en statut « not configured ». Le premier scan (▶ Scanner) la validera : elle passe « connected » en cas de succès, « error » sinon.
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:20px;margin-top:8px">
+        <button class="action-btn" onclick="closeHeliosConnModal()">Annuler</button>
+        <button class="action-btn primary" id="helios-conn-save-btn" onclick="submitHeliosConn()">Connecter</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  document.getElementById('helios-f-dname').focus();
+}
+function closeHeliosConnModal() { document.getElementById('helios-conn-overlay')?.remove(); }
+function heliosToggleAuthFields() {
+  const m = document.querySelector('input[name="helios-authmethod"]:checked')?.value || 'assume_role';
+  document.getElementById('helios-fields-assume_role').style.display = m === 'assume_role' ? '' : 'none';
+  document.getElementById('helios-fields-access_keys').style.display = m === 'access_keys' ? '' : 'none';
+}
+
+async function submitHeliosConn() {
+  const displayName = document.getElementById('helios-f-dname').value.trim();
+  const authMethod = document.querySelector('input[name="helios-authmethod"]:checked')?.value || 'assume_role';
+  if (!displayName) { showToast("⚠ Le nom d'affichage est requis"); return; }
+
+  // SÉCURITÉ — mêmes règles que integrationsConfigureAzureAD : lire les secrets
+  // SANS .trim() dans des const locales, puis VIDER le DOM AVANT l'appel réseau
+  // (si celui-ci échoue et que le modal reste ouvert, plus rien à réafficher).
+  let credentials;
+  if (authMethod === 'assume_role') {
+    const roleArn = document.getElementById('helios-f-rolearn').value;
+    const externalId = document.getElementById('helios-f-extid').value;
+    document.getElementById('helios-f-rolearn').value = '';
+    document.getElementById('helios-f-extid').value = '';
+    if (!roleArn || !externalId) { showToast('⚠ Role ARN et External ID sont requis'); return; }
+    credentials = { roleArn, externalId };
+  } else {
+    const accessKeyId = document.getElementById('helios-f-akid').value;
+    const secretAccessKey = document.getElementById('helios-f-sak').value;
+    const sessionToken = document.getElementById('helios-f-stoken').value;
+    document.getElementById('helios-f-akid').value = '';
+    document.getElementById('helios-f-sak').value = '';
+    document.getElementById('helios-f-stoken').value = '';
+    if (!accessKeyId || !secretAccessKey) { showToast('⚠ Access Key ID et Secret Access Key sont requis'); return; }
+    credentials = sessionToken ? { accessKeyId, secretAccessKey, sessionToken } : { accessKeyId, secretAccessKey };
+  }
+
+  const clientId = currentUser?.role === 'client' ? undefined : heliosSelectedClientId;
+  const btn = document.getElementById('helios-conn-save-btn');
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = '⏳ Connexion...';
+
+  const res = await heliosFetch('/helios/connections', {
+    method: 'POST',
+    body: JSON.stringify({ clientId, provider: 'aws', displayName, authMethod, credentials }),
+  }, 30000);
+
+  btn.disabled = false;
+  btn.textContent = orig;
+
+  if (!res.ok) {
+    showToast('⚠ ' + (res.data?.error || `Échec de la connexion (HTTP ${res.status})`));
+    return;
+  }
+  closeHeliosConnModal();
+  showToast('✅ Connexion créée — lancez un scan pour la valider');
+  await loadHeliosConnections();
+}
+
+// ── Findings ───────────────────────────────────────────────────────────
+async function loadHeliosFindings() {
+  const sev = document.getElementById('helios-f-severity')?.value || '';
+  const st = document.getElementById('helios-f-status')?.value || '';
+  const extra = [];
+  if (sev) extra.push(`severity=${sev}`);
+  if (st) extra.push(`status=${st}`);
+  const res = await heliosFetch(`/helios/findings${heliosQs(extra)}`, {}, 20000);
+  heliosFindingsCache = (res.ok && Array.isArray(res.data?.data)) ? res.data.data : [];
+  renderHeliosFindings();
+}
+
+function renderHeliosFindings() {
+  const tbody = document.getElementById('helios-findings-tbody');
+  if (!heliosFindingsCache.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun finding — lancez un scan sur une connexion</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  heliosFindingsCache.forEach((f, i) => {
+    const tr = document.createElement('tr');
+    const label = f.details?.title || f.check_id || '—';
+    tr.innerHTML = `
+      <td style="max-width:280px"><div style="font-size:12px">${escHtml(label)}</div><div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">${escHtml(f.check_id || '')}${f.service ? ' · ' + escHtml(f.service) : ''}</div></td>
+      <td><span class="sev-badge ${f.severity}">${(f.severity || '').toUpperCase()}</span></td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(f.resource || '')}">${escHtml(f.resource || '—')}${f.region ? ' <span style="opacity:.7">(' + escHtml(f.region) + ')</span>' : ''}</td>
+      <td><span class="status-pill ${f.status}">${escHtml(f.status || '')}</span></td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${f.discovered_at ? new Date(f.discovered_at).toLocaleDateString('fr-FR') : '—'}</td>
+      <td><button class="action-btn" style="padding:4px 10px;font-size:11px" onclick="openHeliosFindingModal(${i})">Détails</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function openHeliosFindingModal(idx) {
+  const f = heliosFindingsCache[idx];
+  if (!f) return;
+  const d = f.details || {};
+  // Conformité : un chip par référentiel + son nombre de contrôles — JAMAIS la
+  // liste exhaustive de chaque contrôle (des dizaines de référentiels sinon).
+  let complianceHtml = '<span style="color:var(--text-dim)">Aucun référentiel associé</span>';
+  if (d.compliance && typeof d.compliance === 'object') {
+    const entries = Object.entries(d.compliance);
+    if (entries.length) {
+      complianceHtml = entries.map(([fw, ctrls]) => {
+        const n = Array.isArray(ctrls) ? ctrls.length : (ctrls == null ? 0 : 1);
+        return `<span style="display:inline-block;background:var(--line2);border:1px solid var(--line);border-radius:3px;padding:3px 8px;margin:0 4px 4px 0;font-family:var(--font-mono);font-size:10px">${escHtml(fw)}${n ? ' · ' + n : ''}</span>`;
+      }).join('');
+    }
+  }
+  const canManage = heliosCanManage();
+  const modal = document.createElement('div');
+  modal.id = 'helios-finding-overlay';
+  modal.style.cssText = `position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;`;
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;max-width:640px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="closeHeliosFindingModal()" style="position:absolute;top:16px;right:16px;background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:8px">FINDING CSPM</div>
+      <div style="font-size:16px;font-weight:700;color:var(--text-bright);margin-bottom:6px">${escHtml(d.title || f.check_id || '—')}</div>
+      <div style="margin-bottom:16px"><span class="sev-badge ${f.severity}">${(f.severity || '').toUpperCase()}</span> <span class="status-pill ${f.status}" style="margin-left:6px">${escHtml(f.status || '')}</span></div>
+
+      <div class="form-group"><label class="form-label">Ressource</label>
+        <div style="font-family:var(--font-mono);font-size:11px;word-break:break-all">${escHtml(f.resource || '—')}${f.region ? ' <span style="color:var(--text-dim)">(' + escHtml(f.region) + ')</span>' : ''}</div></div>
+      ${d.risk ? `<div class="form-group"><label class="form-label">Risque</label><div style="font-size:12px;line-height:1.5">${escHtml(d.risk)}</div></div>` : ''}
+      ${d.statusExtended ? `<div class="form-group"><label class="form-label">Détail</label><div style="font-family:var(--font-mono);font-size:11px;line-height:1.5;color:var(--text-dim)">${escHtml(d.statusExtended)}</div></div>` : ''}
+      ${d.remediation ? `<div class="form-group"><label class="form-label">Remédiation</label><div style="font-size:12px;line-height:1.5">${escHtml(d.remediation)}</div></div>` : ''}
+      ${d.relatedUrl ? `<div class="form-group"><label class="form-label">Référence</label><a href="${escHtml(d.relatedUrl)}" target="_blank" rel="noopener noreferrer" style="font-family:var(--font-mono);font-size:11px;color:var(--cyan);word-break:break-all">${escHtml(d.relatedUrl)}</a></div>` : ''}
+      <div class="form-group"><label class="form-label">Conformité (référentiel · nb de contrôles)</label>
+        <div style="max-height:120px;overflow-y:auto">${complianceHtml}</div></div>
+
+      ${canManage ? `<div style="display:flex;gap:8px;border-top:1px solid var(--line);padding-top:18px;margin-top:8px">
+        <button class="action-btn" style="font-size:11px" onclick="heliosSetFindingStatus('${f.id}','confirmed')">Confirmer</button>
+        <button class="action-btn" style="font-size:11px" onclick="heliosSetFindingStatus('${f.id}','false_positive')">Faux positif</button>
+        <button class="action-btn" style="font-size:11px" onclick="heliosSetFindingStatus('${f.id}','remediated')">Remédié</button>
+      </div>` : ''}
+    </div>`;
+  document.body.appendChild(modal);
+}
+function closeHeliosFindingModal() { document.getElementById('helios-finding-overlay')?.remove(); }
+
+async function heliosSetFindingStatus(findingId, status) {
+  const res = await heliosFetch(`/helios/findings/${findingId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }, 15000);
+  if (!res.ok) { showToast('⚠ ' + (res.data?.error || `Échec (HTTP ${res.status})`)); return; }
+  showToast('✅ Statut mis à jour');
+  closeHeliosFindingModal();
+  await loadHeliosFindings();
+}
+
+// ── Historique des runs + polling léger ───────────────────────────────
+async function loadHeliosRuns() {
+  const res = await heliosFetch(`/helios/runs${heliosQs()}`, {}, 15000);
+  heliosRunsCache = (res.ok && Array.isArray(res.data?.data)) ? res.data.data : [];
+  renderHeliosRuns();
+  heliosSyncPolling();
+}
+
+function renderHeliosRuns() {
+  const tbody = document.getElementById('helios-runs-tbody');
+  if (!heliosRunsCache.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun scan pour le moment</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  heliosRunsCache.forEach(r => {
+    const tr = document.createElement('tr');
+    const err = r.error ? escHtml(r.error.length > 60 ? r.error.slice(0, 60) + '…' : r.error) : '';
+    tr.innerHTML = `
+      <td><span class="status-pill ${r.status}">${escHtml(r.status || '')}</span></td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(r.requested_by || '—')}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${r.started_at ? new Date(r.started_at).toLocaleString('fr-FR') : '—'}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${r.finished_at ? new Date(r.finished_at).toLocaleString('fr-FR') : '—'}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--red)" ${r.error ? `title="${escHtml(r.error)}"` : ''}>${err || '—'}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function heliosHasRunInProgress() {
+  return heliosRunsCache.some(r => r.status === 'pending' || r.status === 'running');
+}
+
+// Démarre/arrête le polling selon : un run est en cours ET l'onglet HELIOS visible.
+function heliosSyncPolling() {
+  const visible = document.getElementById('page-helios')?.classList.contains('active');
+  if (visible && heliosHasRunInProgress()) heliosStartPolling();
+  else heliosStopPolling();
+}
+
+function heliosStartPolling() {
+  if (heliosPollTimer) return;
+  heliosPollTimer = setInterval(async () => {
+    // Auto-nettoyage si l'onglet n'est plus visible (défense en profondeur —
+    // nav() appelle déjà heliosStopPolling en quittant l'onglet).
+    if (!document.getElementById('page-helios')?.classList.contains('active')) { heliosStopPolling(); return; }
+    await loadHeliosRuns();
+    await loadHeliosConnections();
+    if (!heliosHasRunInProgress()) { heliosStopPolling(); await loadHeliosFindings(); }
+  }, 15000);
+}
+
+function heliosStopPolling() {
+  if (heliosPollTimer) { clearInterval(heliosPollTimer); heliosPollTimer = null; }
 }
 
 let toastTimer;
