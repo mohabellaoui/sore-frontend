@@ -7,6 +7,8 @@ PATTERN="${1:-}"
 LOGDIR=".test-logs"; mkdir -p "$LOGDIR"
 LOG="$LOGDIR/last.log"
 LOCK="$LOGDIR/.jest.lock"
+# Base de test isolée (postgres-test, port 5433, tmpfs) — jamais le compose par défaut.
+COMPOSE=(docker compose -f docker-compose.test.yml)
 
 if [[ -e "$LOCK" ]] && kill -0 "$(cat "$LOCK")" 2>/dev/null; then
   echo "ABANDON : un run Jest est déjà en cours (pid $(cat "$LOCK")). Pas de runs concurrents sur postgres-test."
@@ -15,11 +17,12 @@ fi
 echo $$ > "$LOCK"
 cleanup() {
   rm -f "$LOCK"
-  if [[ -z "${KEEP_DB:-}" ]]; then docker compose down -v >/dev/null 2>&1 || true; fi
+  if [[ -z "${KEEP_DB:-}" ]]; then "${COMPOSE[@]}" down -v >/dev/null 2>&1 || true; fi
 }
 trap cleanup EXIT
 
-docker compose up -d >/dev/null 2>&1 || { echo "ÉCHEC docker compose up"; exit 1; }
+# --wait : attend le healthcheck pg_isready avant de migrer.
+"${COMPOSE[@]}" up -d --wait >/dev/null 2>&1 || { echo "ÉCHEC docker compose up (docker-compose.test.yml)"; exit 1; }
 if ! npm run -s db:test:migrate > "$LOGDIR/migrate.log" 2>&1; then
   echo "ÉCHEC migration test — extrait :"; tail -20 "$LOGDIR/migrate.log"; exit 1
 fi
