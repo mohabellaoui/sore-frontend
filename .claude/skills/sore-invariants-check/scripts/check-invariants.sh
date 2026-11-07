@@ -91,6 +91,35 @@ out=$(grep -nHE '(^|[^A-Za-z0-9_.])(where|whereClause|ownerCheck)[[:space:]]*\+?
            gsub(/`[^`]*`/, "", body); gsub(/\047[^\047]*\047/, "", body); gsub(/"[^"]*"/, "", body)
            if (body ~ /\+[[:space:]]*[A-Za-z_$]/) print line }')
 report "clause SQL dynamique (where/ownerCheck/conditions) avec valeur non paramétrée" "$out"
+# Lookup objet indexé par une entrée utilisateur sans Object.hasOwn : obj['constructor'] /
+# obj['__proto__'] renvoient des propriétés héritées d'Object.prototype et passent un
+# contrôle `if (!obj[x])` (cf. argus listExposures, route QA, PERSEUS categories).
+# Deux formes détectées, OK si `hasOwn` figure sur la même ligne ou la précédente :
+#   (a) obj[req.query.x] / obj[req.body.x] / obj[req.params.x]
+#   (b) TABLE_EN_MAJUSCULES[variable] (variable intermédiaire issue de req.*)
+# Exclusions (b) : clés internes vérifiées une à une (pas d'entrée de requête) —
+#   SECRET_TYPE_TO_REGEX, TECH_EOL_MIN_VERSION, TYPOSQUAT_HOMOGLYPHS, QUESTIONS,
+#   SEVERITY_TO_RISK_SCORE, ALERT_SEVERITY_RANK, SEVERITY_RANK, MISP_ATTR_TYPE_MAP,
+#   ABUSEIPDB_CATEGORIES, RISK_TO_SEVERITY, PACKS, PACK_DESCRIPTIONS, NEGATIVE_CONTEXTS,
+#   TASK_STATUS_TRANSITIONS, AUGUR_ENUMS, REPORT_TYPE_LABELS, QA_TABLES ;
+#   TEMPLATE_CATEGORIES[c] dans perseus.js hors filtre = c déjà filtré par hasOwn.
+LOOKUP_INTERNAL='(SECRET_TYPE_TO_REGEX|TECH_EOL_MIN_VERSION|TYPOSQUAT_HOMOGLYPHS|QUESTIONS|SEVERITY_TO_RISK_SCORE|ALERT_SEVERITY_RANK|SEVERITY_RANK|MISP_ATTR_TYPE_MAP|ABUSEIPDB_CATEGORIES|RISK_TO_SEVERITY|PACKS|PACK_DESCRIPTIONS|NEGATIVE_CONTEXTS|TASK_STATUS_TRANSITIONS|AUGUR_ENUMS|REPORT_TYPE_LABELS|QA_TABLES)\['
+out=$(awk '
+  FNR==1 { prev = "" }
+  { line = $0
+    hit = 0
+    if (line ~ /[A-Za-z0-9_$)\]]\[req\.(query|body|params)\.[A-Za-z0-9_]+\]/) hit = 1
+    else if (line ~ /[^A-Za-z0-9_]?[A-Z][A-Z0-9_]{2,}\[[a-z][A-Za-z0-9_.]*\]/) hit = 2
+    if (hit && line !~ /hasOwn/ && prev !~ /hasOwn/) print FILENAME":"FNR":"(hit == 2 ? "@B@" : "")line
+    prev = line }' "${FILES[@]}" 2>/dev/null \
+  | grep -vE "$COMMENT_RE" \
+  | grep -vE "^[^:]+:[0-9]+:@B@.*$LOOKUP_INTERNAL" \
+  | grep -vE '^src/agents/perseus\.js:[0-9]+:@B@.*TEMPLATE_CATEGORIES\[c\]' \
+  | sed -E 's/@B@//')
+# argus.js listExposures : hasOwn dans le `if` deux lignes au-dessus (if multi-lignes).
+out=$(printf '%s' "$out" | grep -vE '^src/agents/argus\.js:[0-9]+:[[:space:]]*conditions\.push\(severityRanges\[severity\]\)')
+report "lookup objet sur entrée utilisateur sans Object.hasOwn" "$out"
+
 # SCOUT : outil interne. Ignorés : agent/données SCOUT, constantes SCOUT_*, tags de log [SCOUT],
 # et toute ligne située dans une route Express réservée au seul rôle admin.
 out=$(awk '

@@ -24,6 +24,7 @@ Pour chaque route ajoutée ou modifiée dans le diff :
 - [ ] Entrée CHRONICLE pour l'action
 - [ ] Test d'intégration couvrant le 404 cross-tenant
 - [ ] Toute nouvelle valeur interpolée dans du SQL passe par $${params.push(...)}. La liste blanche (where, ownerCheck, constantes en MAJUSCULES) n'est jamais un raccourci pour une valeur utilisateur.
+- [ ] Analyse ligne par ligne : une requête SQL multi-lignes n'est vérifiée que sur sa première ligne — relire manuellement.
 
 ## 3. Référence des invariants
 | Invariant | Raison |
