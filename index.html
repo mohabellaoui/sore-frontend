@@ -795,6 +795,27 @@ select.form-input option{background:var(--surface)}
 .scout-memoire a{color:var(--cyan)}
 .scout-trigger-chip{background:var(--surface);border:1px solid var(--line);color:var(--text-dim);padding:2px 9px;border-radius:4px;font-size:10px;font-family:var(--font-mono)}
 
+/* ── DÉMO SPOOFING (APATE, Pôle AEGIS) — sous-onglets, tag-input emails, légende
+   risque, aperçu de template. Préfixe sd- pour rester repérable comme les
+   autres blocs propres à un module (.argus-*, .scout-*). ── */
+.sd-subtab-row{display:flex;gap:8px;margin-bottom:20px;border-bottom:1px solid var(--line2)}
+.sd-subtab-btn{padding:10px 18px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text-dim);font-family:var(--font-display);font-size:14px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;transition:.2s;display:flex;align-items:center;gap:8px}
+.sd-subtab-btn:hover{color:var(--text-bright)}
+.sd-subtab-btn.active{color:var(--cyan);border-bottom-color:var(--cyan)}
+.sd-subtab-count{background:var(--elevated);border:1px solid var(--line);border-radius:10px;padding:1px 8px;font-family:var(--font-mono);font-size:10px}
+.sd-tag-wrap{background:var(--elevated);border:1px solid var(--line);border-radius:2px;padding:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.sd-tag-wrap:focus-within{border-color:var(--cyan);box-shadow:0 0 0 2px var(--cyan-dim)}
+.sd-tag-chip{display:inline-flex;align-items:center;gap:6px;background:var(--cyan-dim);border:1px solid rgba(0,180,220,.3);color:var(--cyan);border-radius:2px;padding:4px 8px;font-family:var(--font-mono);font-size:11px}
+.sd-tag-chip button{background:none;border:none;color:var(--cyan);cursor:pointer;font-size:12px;line-height:1;padding:0}
+.sd-tag-field{flex:1;min-width:160px;background:none;border:none;outline:none;color:var(--text-bright);font-family:var(--font-mono);font-size:12px;padding:4px}
+.sd-tag-field::placeholder{color:var(--text-dim)}
+.sd-risk-legend{display:flex;flex-wrap:wrap;gap:16px;font-family:var(--font-mono);font-size:10px;color:var(--text-dim);background:var(--elevated);border:1px solid var(--line2);border-radius:2px;padding:10px 14px;margin-bottom:16px}
+.sd-risk-legend b{color:var(--text-bright);font-weight:600}
+.sd-template-preview{background:var(--void);border:1px solid var(--line2);border-radius:4px;padding:16px;font-family:var(--font-mono);font-size:11.5px;color:var(--text);line-height:1.7;white-space:pre-wrap;word-break:break-word;height:100%;min-height:260px}
+.sd-var-chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}
+.sd-var-chip{background:var(--elevated);border:1px solid var(--line);color:var(--cyan);font-family:var(--font-mono);font-size:10px;padding:3px 9px;border-radius:10px}
+.sd-test-modal-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+
 /* ── RESPONSIVE ── */
 @media(max-width:900px){
   .stats-grid{grid-template-columns:1fr 1fr}
@@ -803,6 +824,7 @@ select.form-input option{background:var(--surface)}
   .chat-sidebar{display:none}
   .services-grid,.packs-grid{grid-template-columns:1fr}
   .tb-nav .tb-btn span{display:none}
+  .sd-test-modal-grid{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -875,6 +897,7 @@ select.form-input option{background:var(--surface)}
           <div class="tb-dropdown-item" onclick="nav('argus')" data-page="argus"><span class="tb-icon">🎯</span><span>Exposition</span></div>
           <div class="tb-dropdown-item" onclick="nav('activescan')" data-page="activescan"><span class="tb-icon">🛡</span><span>Scan Actif</span></div>
           <div class="tb-dropdown-item" onclick="nav('helios')" data-page="helios"><span class="tb-icon">☁</span><span>CSPM Cloud</span></div>
+          <div class="tb-dropdown-item" onclick="nav('spoofdemo')" data-page="spoofdemo"><span class="tb-icon">🪞</span><span>Démo Spoofing</span></div>
         </div>
       </div>
 
@@ -2128,6 +2151,95 @@ select.form-input option{background:var(--surface)}
       </div>
     </div>
 
+    <!-- ══ Démo Spoofing (APATE, Pôle AEGIS) — démonstration CONTRÔLÉE d'usurpation
+         email sous mandat, complément d'ARGUS (passif). Libellé client "Démo
+         Spoofing" uniquement (même convention que l'onglet "Scan Actif") — le
+         nom interne du module n'apparaît nulle part dans l'UI, hors le chemin réel
+         des routes /api/apate/*. TOUTES les routes backend sont réservées à
+         admin/analyst (aucun accès rôle 'client', contrairement à Scan Actif/HELIOS
+         qui autorisent une lecture scoped-tenant) — donc pas de sélecteur "lecture
+         seule pour le rôle client" ici : le rôle client voit un état "réservé". ══ -->
+    <div class="page" id="page-spoofdemo">
+      <div class="section-header">
+        <div><div class="section-title">Démo Spoofing</div><div class="section-sub">Preuve d'exploitabilité SPF/DKIM/DMARC sous mandat — un destinataire désigné, jamais d'envoi de masse · complément d'ARGUS (passif)</div></div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <select class="form-input" id="spoofdemo-client-select" style="display:none;min-width:230px" onchange="onSpoofDemoClientChange()"></select>
+          <button class="action-btn" onclick="loadSpoofDemo()">↺ Actualiser</button>
+        </div>
+      </div>
+
+      <div id="spoofdemo-restricted-hint" class="card" style="display:none">
+        <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim);padding:8px 0">Module réservé aux équipes Sore Security (admin/analyst).</div>
+      </div>
+
+      <div id="spoofdemo-hint" class="card" style="display:none">
+        <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim);padding:8px 0">Sélectionnez un client pour afficher ses autorisations et ses tests.</div>
+      </div>
+
+      <div id="spoofdemo-body" style="display:none">
+        <div class="stats-grid">
+          <div class="stat-card cyan">
+            <div class="stat-label-top">Autorisations</div>
+            <div class="stat-val cyan" id="sd-stat-auth-total">—</div>
+            <div class="stat-sub">tous statuts</div>
+          </div>
+          <div class="stat-card green">
+            <div class="stat-label-top">Approuvées — fenêtre courante</div>
+            <div class="stat-val green" id="sd-stat-auth-active">—</div>
+            <div class="stat-sub">exploitables maintenant</div>
+          </div>
+          <div class="stat-card cyan">
+            <div class="stat-label-top">Tests effectués</div>
+            <div class="stat-val cyan" id="sd-stat-tests-total">—</div>
+            <div class="stat-sub">tous statuts</div>
+          </div>
+          <div class="stat-card amber">
+            <div class="stat-label-top">Usurpations non bloquées</div>
+            <div class="stat-val amber" id="sd-stat-delivered">—</div>
+            <div class="stat-sub">statut "delivered" — risque client</div>
+          </div>
+        </div>
+
+        <div class="sd-subtab-row">
+          <button class="sd-subtab-btn active" id="sd-subtab-auth" onclick="switchSpoofDemoView('auth')">Autorisations <span class="sd-subtab-count" id="sd-count-auth">0</span></button>
+          <button class="sd-subtab-btn" id="sd-subtab-tests" onclick="switchSpoofDemoView('tests')">Tests <span class="sd-subtab-count" id="sd-count-tests">0</span></button>
+        </div>
+
+        <!-- ── VUE 1 : AUTORISATIONS ── -->
+        <div id="sd-view-auth">
+          <div class="card">
+            <div class="section-header" style="margin-bottom:14px;padding-bottom:0;border:none">
+              <div class="card-title" style="margin:0"><span class="dot" style="background:var(--cyan)"></span>Mandats de démonstration</div>
+              <button class="action-btn primary" id="sd-new-auth-btn" style="display:none" onclick="openSpoofDemoAuthModal()">+ Nouvelle autorisation</button>
+            </div>
+            <div class="table-wrap"><table class="data-table">
+              <thead><tr><th>Référence</th><th>Client</th><th>Domaine</th><th>Emails autorisés</th><th>Fenêtre</th><th>Statut</th><th></th></tr></thead>
+              <tbody id="sd-auth-tbody"><tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+            </table></div>
+          </div>
+        </div>
+
+        <!-- ── VUE 2 : TESTS ── -->
+        <div id="sd-view-tests" style="display:none">
+          <div class="sd-risk-legend">
+            <span>Code couleur = <b>risque sécurité du client</b>, pas succès de la démo :</span>
+            <span><span style="background:var(--amber-dim);color:var(--amber);border:1px solid rgba(255,170,0,.3);padding:2px 8px;border-radius:2px">Delivered</span> = usurpation <b>non bloquée</b> (mauvais pour le client)</span>
+            <span><span style="background:var(--green-dim);color:var(--green);border:1px solid rgba(0,255,136,.25);padding:2px 8px;border-radius:2px">Rejected</span> = protection <b>efficace</b> (bon pour le client)</span>
+          </div>
+          <div class="card">
+            <div class="section-header" style="margin-bottom:14px;padding-bottom:0;border:none">
+              <div class="card-title" style="margin:0"><span class="dot" style="background:var(--amber)"></span>Tests de démonstration</div>
+              <button class="action-btn primary" id="sd-new-test-btn" style="display:none" onclick="openSpoofDemoTestModal()">+ Nouveau test</button>
+            </div>
+            <div class="table-wrap"><table class="data-table">
+              <thead><tr><th>Date</th><th>Autorisation liée</th><th>Destination</th><th>Émetteur usurpé</th><th>Objet</th><th>Statut</th><th></th></tr></thead>
+              <tbody id="sd-tests-tbody"><tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Chargement...</td></tr></tbody>
+            </table></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ══ HELIOS — CSPM Cloud (Pôle AEGIS) ══ -->
     <div class="page" id="page-helios">
       <div class="section-header">
@@ -2459,6 +2571,7 @@ function nav(page) {
   if (page === 'scout') loadScout();
   if (page === 'activescan') loadActiveScan();
   if (page === 'helios') loadHeliosPage();
+  if (page === 'spoofdemo') loadSpoofDemo();
   if (page === 'threatintel') loadThreatIntel();
 }
 
@@ -10626,6 +10739,551 @@ async function submitActiveScanAuth() {
   closeActiveScanAuthModal();
   showToast('✅ Autorisation créée' + (body.status === 'active' ? ' et activée' : " (en attente d'activation)"));
   await refreshActiveScanAuthorizations();
+}
+
+// ════════════════════════════════════════════
+// DÉMO SPOOFING — démonstration CONTRÔLÉE d'usurpation email (complément d'ARGUS)
+//
+// Libellé "Démo Spoofing" partout côté UI — le nom interne du module (APATE)
+// n'apparaît nulle part ici, hors le chemin réel des routes /api/apate/*, qui
+// EST l'URL du serveur (même convention que l'onglet "Scan Actif").
+//
+// DIFFÉRENCE avec Scan Actif/HELIOS : /api/apate/* est réservé admin/analyst
+// SANS EXCEPTION côté backend (pas de branche 'client' dans resolveTenantScope
+// utilisée ici) — donc pas de mode lecture seule pour le rôle client comme sur
+// Scan Actif/CSPM Cloud, juste un état "réservé" (#spoofdemo-restricted-hint).
+//
+// Le backend reste la SEULE source de vérité : POST /apate/tests et POST
+// /apate/tests/:id/send appellent tous deux assertSpoofAuthorized() côté
+// serveur. spoofDemoAuthCoversNow() ci-dessous ne sert qu'à activer/désactiver
+// des contrôles d'UX (dropdown d'autorisation à la création d'un test, bouton
+// "Lancer l'envoi" à l'affichage) — jamais une garantie de sécurité, jamais un
+// statut réécrit côté client.
+//
+// Le sujet ET le corps du mail sont ENTIÈREMENT générés côté serveur à partir
+// d'un template fixe (apate.js, renderSpoofTestContent) — createTest() n'a
+// même pas de paramètre pour les recevoir. Le formulaire "Nouveau test" ne
+// propose donc AUCUN champ objet/corps éditable : seuls autorisation,
+// destination et émetteur usurpé sont des entrées réelles ; objet et corps
+// sont un APERÇU en lecture seule de ce que le serveur produira.
+// ════════════════════════════════════════════
+let spoofDemoClientsCache = [];
+let spoofDemoSelectedClientId = '';
+let spoofDemoAuthorizations = [];
+let spoofDemoTests = [];
+let spoofDemoView = 'auth';
+
+function spoofDemoCanManage() { return ['admin', 'analyst'].includes(currentUser?.role); }
+function spoofDemoIsAdmin() { return currentUser?.role === 'admin'; } // création/approbation de mandat = admin seul, voir apate.js
+
+function spoofDemoClientParam() {
+  return spoofDemoSelectedClientId ? `clientId=${spoofDemoSelectedClientId}` : '';
+}
+
+// PURE — reflète assertSpoofAuthorized() côté backend pour la partie
+// "statut + fenêtre" (la vérification target_email est propre à chaque test,
+// voir renderSpoofDemoTestsTable). Sert uniquement à l'état d'UX ; n'écrit
+// rien, ne remplace pas le contrôle backend.
+function spoofDemoAuthCoversNow(auth, now = new Date()) {
+  if (!auth || auth.status !== 'approved') return false;
+  const t = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  if (auth.window_start && new Date(auth.window_start).getTime() > t) return false;
+  if (auth.window_end && new Date(auth.window_end).getTime() < t) return false;
+  return true;
+}
+
+function spoofDemoAuthStatusBadge(status) {
+  const cfg = {
+    pending:  { color: 'var(--text-dim)', bg: 'rgba(120,130,140,.12)', label: 'En attente' },
+    approved: { color: 'var(--green)',    bg: 'var(--green-dim)',      label: 'Approuvée' },
+    rejected: { color: 'var(--red)',      bg: 'var(--red-dim)',        label: 'Rejetée' },
+    expired:  { color: 'var(--red)',      bg: 'var(--red-dim)',        label: 'Expirée' },
+    revoked:  { color: 'var(--red)',      bg: 'var(--red-dim)',        label: 'Révoquée' },
+  }[status] || { color: 'var(--text-dim)', bg: 'rgba(120,130,140,.12)', label: status || '—' };
+  return `<span style="background:${cfg.bg};color:${cfg.color};border:1px solid ${cfg.color};
+    border-radius:4px;padding:2px 8px;font-size:10px;font-family:var(--font-mono);text-transform:uppercase">${escHtml(cfg.label)}</span>`;
+}
+
+// Code couleur = RISQUE SÉCURITÉ CLIENT, jamais "succès de la démo" : delivered
+// (usurpation non bloquée) = amber/warning, PAS vert. rejected (protection
+// efficace) = vert, PAS un "échec" de test.
+function spoofDemoTestStatusBadge(status) {
+  const cfg = {
+    pending:   { color: 'var(--text-dim)', bg: 'rgba(120,130,140,.12)', label: 'En attente' },
+    sent:      { color: 'var(--cyan)',     bg: 'var(--cyan-dim)',       label: 'Envoyé' },
+    delivered: { color: 'var(--amber)',    bg: 'var(--amber-dim)',      label: '⚠ Délivré — non bloqué' },
+    spam:      { color: '#e8d44d',         bg: 'rgba(232,212,77,.15)',  label: 'Spam' },
+    rejected:  { color: 'var(--green)',    bg: 'var(--green-dim)',      label: '✓ Rejeté — protégé' },
+    error:     { color: 'var(--red)',      bg: 'var(--red-dim)',        label: 'Erreur' },
+  }[status] || { color: 'var(--text-dim)', bg: 'rgba(120,130,140,.12)', label: status || '—' };
+  return `<span style="background:${cfg.bg};color:${cfg.color};border:1px solid ${cfg.color};
+    border-radius:4px;padding:2px 8px;font-size:10px;font-family:var(--font-mono);text-transform:uppercase">${escHtml(cfg.label)}</span>`;
+}
+
+function spoofDemoFmtDate(iso) {
+  if (!iso) return '<span style="color:var(--text-dim)">—</span>';
+  const d = new Date(iso);
+  if (isNaN(d)) return '<span style="color:var(--text-dim)">—</span>';
+  return d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function spoofDemoFmtWindow(auth) {
+  const f = iso => { const d = new Date(iso); return isNaN(d) ? '—' : d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); };
+  return `<span style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${f(auth.window_start)} → ${f(auth.window_end)}</span>`;
+}
+
+async function loadSpoofDemo() {
+  const selectEl = document.getElementById('spoofdemo-client-select');
+  const restrictedHint = document.getElementById('spoofdemo-restricted-hint');
+  const hint = document.getElementById('spoofdemo-hint');
+  const bodyEl = document.getElementById('spoofdemo-body');
+
+  // Aucune branche 'client' côté backend (contrairement à Scan Actif/HELIOS) —
+  // le rôle client n'a droit à AUCUNE route /api/apate/*, donc pas de tentative
+  // d'appel, juste un état "réservé".
+  if (!spoofDemoCanManage()) {
+    selectEl.style.display = 'none';
+    hint.style.display = 'none';
+    bodyEl.style.display = 'none';
+    restrictedHint.style.display = 'block';
+    return;
+  }
+  restrictedHint.style.display = 'none';
+
+  document.getElementById('sd-new-auth-btn').style.display = spoofDemoIsAdmin() ? '' : 'none'; // création de mandat = admin seul
+  document.getElementById('sd-new-test-btn').style.display = spoofDemoCanManage() ? '' : 'none';
+
+  if (!spoofDemoClientsCache.length) {
+    const res = await apiCall('/clients?limit=100');
+    spoofDemoClientsCache = res?.data || [];
+  }
+  selectEl.style.display = '';
+  selectEl.innerHTML = `<option value="">— Sélectionner un client —</option>${spoofDemoClientsCache.map(c => `<option value="${c.id}" ${c.id === spoofDemoSelectedClientId ? 'selected' : ''}>${escHtml(c.name)}</option>`).join('')}`;
+  if (!spoofDemoSelectedClientId) {
+    hint.style.display = 'block';
+    bodyEl.style.display = 'none';
+    return;
+  }
+
+  hint.style.display = 'none';
+  bodyEl.style.display = 'block';
+  await Promise.all([refreshSpoofDemoAuthorizations(), refreshSpoofDemoTests()]);
+}
+function onSpoofDemoClientChange() {
+  spoofDemoSelectedClientId = document.getElementById('spoofdemo-client-select').value;
+  loadSpoofDemo();
+}
+
+function switchSpoofDemoView(view) {
+  spoofDemoView = view;
+  document.getElementById('sd-subtab-auth').classList.toggle('active', view === 'auth');
+  document.getElementById('sd-subtab-tests').classList.toggle('active', view === 'tests');
+  document.getElementById('sd-view-auth').style.display = view === 'auth' ? '' : 'none';
+  document.getElementById('sd-view-tests').style.display = view === 'tests' ? '' : 'none';
+  // Revalider à l'ouverture de la vue Tests (pas seulement à la création) — les
+  // boutons "Lancer l'envoi" reflètent l'état des autorisations À CET INSTANT.
+  if (view === 'tests') renderSpoofDemoTestsTable();
+}
+
+// ── Autorisations ──
+async function refreshSpoofDemoAuthorizations() {
+  const res = await apiCall(`/apate/authorizations?${spoofDemoClientParam()}`);
+  spoofDemoAuthorizations = res?.data || [];
+  renderSpoofDemoAuthTable();
+  document.getElementById('sd-count-auth').textContent = spoofDemoAuthorizations.length;
+  document.getElementById('sd-stat-auth-total').textContent = spoofDemoAuthorizations.length;
+  document.getElementById('sd-stat-auth-active').textContent = spoofDemoAuthorizations.filter(a => spoofDemoAuthCoversNow(a)).length;
+}
+
+function renderSpoofDemoAuthTable() {
+  const tbody = document.getElementById('sd-auth-tbody');
+  if (!spoofDemoAuthorizations.length) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucune autorisation${spoofDemoIsAdmin() ? ' — créez-en une' : ''}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  spoofDemoAuthorizations.forEach(a => {
+    const tr = document.createElement('tr');
+    const canApprove = spoofDemoIsAdmin() && a.status === 'pending';
+    tr.innerHTML = `
+      <td style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-bright)">${escHtml(a.reference)}</td>
+      <td style="font-size:12px">${escHtml(spoofDemoClientsCache.find(c => c.id === a.tenant_id)?.name || '—')}</td>
+      <td style="font-family:var(--font-mono);font-size:12px">${escHtml(a.domain)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${(a.target_emails || []).map(escHtml).join('<br>')}</td>
+      <td>${spoofDemoFmtWindow(a)}</td>
+      <td>${spoofDemoAuthStatusBadge(a.status)}</td>
+      <td style="text-align:right;white-space:nowrap">${canApprove ? `<button class="action-btn" style="padding:5px 10px;font-size:10px" onclick="approveSpoofDemoAuth('${a.id}')">Approuver</button>` : ''}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// ── Nouvelle autorisation (admin uniquement — voir apate.js, POST /apate/authorizations requireRole('admin')) ──
+function spoofDemoBuildReferencePreview() {
+  const clientId = document.getElementById('sd-af-client')?.value;
+  const client = spoofDemoClientsCache.find(c => c.id === clientId);
+  const slug = (client?.name || 'CLIENT').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'CLIENT';
+  const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  document.getElementById('sd-af-reference').value = `AUTH-SPOOF-${ymd}-${slug}`;
+}
+
+let spoofDemoAuthEmails = [];
+function spoofDemoRenderAuthEmailTags() {
+  const wrap = document.getElementById('sd-af-emails-wrap');
+  wrap.querySelectorAll('.sd-tag-chip').forEach(el => el.remove());
+  const field = document.getElementById('sd-af-email-field');
+  spoofDemoAuthEmails.forEach((email, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'sd-tag-chip';
+    chip.innerHTML = `${escHtml(email)} <button type="button" onclick="spoofDemoRemoveAuthEmail(${i})">✕</button>`;
+    wrap.insertBefore(chip, field);
+  });
+}
+function spoofDemoAddAuthEmailFromField() {
+  const field = document.getElementById('sd-af-email-field');
+  const v = field.value.trim().toLowerCase();
+  if (!v) return;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) { showToast('⚠ Adresse email invalide : ' + v); return; }
+  if (!spoofDemoAuthEmails.includes(v)) spoofDemoAuthEmails.push(v);
+  field.value = '';
+  spoofDemoRenderAuthEmailTags();
+}
+function spoofDemoRemoveAuthEmail(i) { spoofDemoAuthEmails.splice(i, 1); spoofDemoRenderAuthEmailTags(); }
+
+function openSpoofDemoAuthModal() {
+  if (!spoofDemoIsAdmin()) return;
+  if (!spoofDemoSelectedClientId) { showToast("⚠ Sélectionnez d'abord un client"); return; }
+  spoofDemoAuthEmails = [];
+  const modal = document.createElement('div');
+  modal.id = 'spoofdemo-auth-overlay';
+  modal.style.cssText = `position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;`;
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;max-width:560px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="closeSpoofDemoAuthModal()" style="position:absolute;top:16px;right:16px;background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:24px">NOUVELLE AUTORISATION — DÉMONSTRATION SPOOFING</div>
+
+      <div class="form-group"><label class="form-label">Client *</label>
+        <select class="form-input" id="sd-af-client" onchange="spoofDemoBuildReferencePreview()">
+          ${spoofDemoClientsCache.map(c => `<option value="${c.id}" ${c.id === spoofDemoSelectedClientId ? 'selected' : ''}>${escHtml(c.name)}</option>`).join('')}
+        </select></div>
+
+      <div class="form-group"><label class="form-label">Domaine cible *</label>
+        <input class="form-input" id="sd-af-domain" placeholder="exemple-client.ma"/></div>
+
+      <div class="form-group"><label class="form-label">Emails destinataires autorisés — liste fermée *</label>
+        <div class="sd-tag-wrap" id="sd-af-emails-wrap">
+          <input class="sd-tag-field" id="sd-af-email-field" placeholder="dg@client.ma puis Entrée"
+                 onkeydown="if(event.key==='Enter'||event.key===','){event.preventDefault();spoofDemoAddAuthEmailFromField();}"/>
+        </div>
+        <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:5px;line-height:1.5">Chaque adresse ajoutée ici est la SEULE liste que le backend acceptera comme destination d'un test lié à ce mandat — aucune saisie libre possible au lancement (assertSpoofAuthorized).</div></div>
+
+      <div style="display:flex;gap:12px">
+        <div class="form-group" style="flex:1"><label class="form-label">Début de la fenêtre *</label>
+          <input class="form-input" id="sd-af-winstart" type="datetime-local"/></div>
+        <div class="form-group" style="flex:1"><label class="form-label">Fin de la fenêtre *</label>
+          <input class="form-input" id="sd-af-winend" type="datetime-local"/></div>
+      </div>
+
+      <div class="form-group"><label class="form-label">Demandé par — nom &amp; fonction *</label>
+        <input class="form-input" id="sd-af-requestedby" placeholder="Ex. S. Idrissi, Pentester"/></div>
+
+      <div class="form-group"><label class="form-label">Référence (générée automatiquement)</label>
+        <input class="form-input" id="sd-af-reference" readonly/>
+        <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:5px;line-height:1.5">Format AUTH-SPOOF-YYYYMMDD-CLIENT — aperçu indicatif ; la référence réellement enregistrée est calculée et garantie unique par le serveur (buildAuthorizationReference).</div></div>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:20px;margin-top:8px">
+        <button class="action-btn" onclick="closeSpoofDemoAuthModal()">Annuler</button>
+        <button class="action-btn primary" id="sd-af-save-btn" onclick="submitSpoofDemoAuth()">Créer l'autorisation</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  spoofDemoBuildReferencePreview();
+  document.getElementById('sd-af-domain').focus();
+}
+function closeSpoofDemoAuthModal() { document.getElementById('spoofdemo-auth-overlay')?.remove(); }
+
+async function submitSpoofDemoAuth() {
+  const clientId = document.getElementById('sd-af-client').value;
+  const domain = document.getElementById('sd-af-domain').value.trim().toLowerCase();
+  const winStart = document.getElementById('sd-af-winstart').value;
+  const winEnd = document.getElementById('sd-af-winend').value;
+  const requestedBy = document.getElementById('sd-af-requestedby').value.trim();
+
+  if (!domain) { showToast('⚠ Le domaine cible est requis'); return; }
+  if (!spoofDemoAuthEmails.length) { showToast('⚠ Au moins un email destinataire est requis'); return; }
+  if (!winStart || !winEnd) { showToast('⚠ Fenêtre de test requise'); return; }
+  if (new Date(winEnd) <= new Date(winStart)) { showToast('⚠ La fin de fenêtre doit suivre le début'); return; }
+  if (!requestedBy) { showToast('⚠ Le nom du demandeur est requis'); return; }
+
+  const btn = document.getElementById('sd-af-save-btn');
+  btn.disabled = true; btn.textContent = 'Création…';
+  const res = await apiCallEx('/apate/authorizations', { method: 'POST', body: JSON.stringify({
+    clientId, domain, targetEmails: spoofDemoAuthEmails,
+    windowStart: new Date(winStart).toISOString(), windowEnd: new Date(winEnd).toISOString(),
+    requestedBy,
+  }) });
+  btn.disabled = false; btn.textContent = "Créer l'autorisation";
+
+  if (!res.ok) { showToast('⚠ ' + (res.error || "Erreur lors de la création de l'autorisation")); return; }
+  closeSpoofDemoAuthModal();
+  showToast("✅ Autorisation créée (en attente d'approbation)");
+  await refreshSpoofDemoAuthorizations();
+}
+
+// Confirmation modale native — même patron que partout ailleurs dans ce
+// fichier pour une action sensible irréversible (use case, case, workflow,
+// scan ARGUS / Scan Actif, révocation HELIOS : AUCUN de ces flux n'utilise de
+// composant modal dédié, tous utilisent window.confirm()). Aucun composant
+// de confirmation stylé n'existe dans ce fichier — en créer un ici aurait été
+// introduire un nouveau composant, contrairement à la consigne.
+async function approveSpoofDemoAuth(id) {
+  if (!spoofDemoIsAdmin()) return;
+  const auth = spoofDemoAuthorizations.find(a => a.id === id);
+  if (!auth) return;
+  if (!confirm(`Cette action autorise l'envoi d'un email usurpant le domaine ${auth.domain}. Confirmer ?`)) return;
+
+  const approvedBy = prompt("Nom et fonction du signataire qui approuve :", "");
+  if (!approvedBy || !approvedBy.trim()) { showToast('⚠ Approbation annulée — signataire requis'); return; }
+
+  const res = await apiCallEx(`/apate/authorizations/${id}/approve`, { method: 'PATCH', body: JSON.stringify({ approvedBy: approvedBy.trim() }) });
+  if (!res.ok) { showToast('⚠ ' + (res.error || "Échec de l'approbation")); return; }
+  showToast('✅ Autorisation approuvée — exploitable dans sa fenêtre de test');
+  await refreshSpoofDemoAuthorizations();
+  await refreshSpoofDemoTests(); // les boutons "Lancer l'envoi" dépendent de ce statut
+}
+
+// ── Tests ──
+async function refreshSpoofDemoTests() {
+  const res = await apiCall(`/apate/tests?${spoofDemoClientParam()}`);
+  spoofDemoTests = res?.data || [];
+  renderSpoofDemoTestsTable();
+  document.getElementById('sd-count-tests').textContent = spoofDemoTests.length;
+  document.getElementById('sd-stat-tests-total').textContent = spoofDemoTests.length;
+  document.getElementById('sd-stat-delivered').textContent = spoofDemoTests.filter(t => t.status === 'delivered').length;
+}
+
+function renderSpoofDemoTestsTable() {
+  const tbody = document.getElementById('sd-tests-tbody');
+  if (!spoofDemoTests.length) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">Aucun test${spoofDemoCanManage() ? ' — créez-en un depuis une autorisation approuvée' : ''}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = '';
+  [...spoofDemoTests].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).forEach(t => {
+    const auth = spoofDemoAuthorizations.find(a => a.id === t.authorization_id);
+    const tr = document.createElement('tr');
+
+    let actionsHtml = '';
+    if (t.status === 'pending' && spoofDemoCanManage()) {
+      // Revalidation À L'AFFICHAGE (pas seulement à la création) — le mandat a
+      // pu expirer/être révoqué entre la création du test et maintenant.
+      const covers = auth ? spoofDemoAuthCoversNow(auth) : false;
+      const reason = !auth ? 'Autorisation introuvable'
+        : auth.status !== 'approved' ? `Autorisation au statut '${auth.status}'`
+        : 'Hors de la fenêtre de test autorisée';
+      actionsHtml = covers
+        ? `<button class="action-btn primary" style="padding:5px 10px;font-size:10px" onclick="sendSpoofDemoTest('${t.id}')">▶ Lancer l'envoi</button>`
+        : `<button class="action-btn" style="padding:5px 10px;font-size:10px" disabled title="${escHtml(reason)} — le serveur refuserait l'envoi (SPOOF_NOT_AUTHORIZED)">▶ Lancer l'envoi</button>`;
+    } else if (t.status === 'sent' && spoofDemoCanManage()) {
+      actionsHtml = `<button class="action-btn" style="padding:5px 10px;font-size:10px" onclick="openSpoofDemoResultModal('${t.id}')">Enregistrer le résultat</button>`;
+    } else if (t.authentication_results?.raw) {
+      actionsHtml = `<button class="action-btn" style="padding:5px 10px;font-size:10px" onclick="alert(${JSON.stringify(String(t.authentication_results.raw))})" title="Voir les en-têtes Authentication-Results">Voir en-têtes</button>`;
+    }
+
+    tr.innerHTML = `
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);white-space:nowrap">${spoofDemoFmtDate(t.created_at)}</td>
+      <td style="font-family:var(--font-mono);font-size:10.5px">${escHtml(auth?.reference || t.authorization_id)}</td>
+      <td style="font-family:var(--font-mono);font-size:12px">${escHtml(t.target_email)}</td>
+      <td style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim)">${escHtml(t.spoofed_from)}</td>
+      <td style="font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(t.subject)}">${escHtml(t.subject)}</td>
+      <td>${spoofDemoTestStatusBadge(t.status)}</td>
+      <td style="text-align:right;white-space:nowrap">${actionsHtml}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// ── Nouveau test — objet ET corps sont ENTIÈREMENT générés par le serveur à
+// partir du template fixe (apate.js, SPOOF_SUBJECT_TEMPLATE/SPOOF_BODY_TEMPLATE) ;
+// createTest() n'accepte ni l'un ni l'autre en entrée. Les deux ci-dessous ne
+// sont donc qu'un APERÇU en lecture seule, jamais transmis dans le POST. ──
+const SPOOF_TEMPLATE_VARS = [
+  { key: 'targetDomain', label: 'Domaine cible' },
+  { key: 'reference', label: "Référence d'autorisation" },
+  { key: 'soreContact', label: 'Contact Sore Security' },
+];
+const SPOOF_SORE_CONTACT_PREVIEW = 'contact@sore-security.com'; // APATE_SORE_CONTACT côté serveur, valeur par défaut affichée ici
+
+function spoofDemoRenderPreview() {
+  const authId = document.getElementById('sd-tf-auth')?.value;
+  const auth = spoofDemoAuthorizations.find(a => a.id === authId);
+  const vars = {
+    targetDomain: auth?.domain || '{{targetDomain}}',
+    reference: auth?.reference || '{{reference}}',
+    soreContact: SPOOF_SORE_CONTACT_PREVIEW,
+  };
+  const subjectEl = document.getElementById('sd-tf-subject-preview');
+  if (subjectEl) subjectEl.textContent = `[Test technique autorisé — ${vars.reference}] Démonstration de sécurité email`;
+
+  const body = `Ceci est un message de TEST TECHNIQUE AUTORISÉ, envoyé dans le cadre d'une démonstration contrôlée de sécurité email pour le domaine ${vars.targetDomain}.
+
+Référence d'autorisation : ${vars.reference}
+
+Ce message a pour seul objectif de vérifier le comportement des contrôles d'authentification email (SPF/DKIM/DMARC) de ce domaine. Il ne contient aucun lien, aucune pièce jointe, et ne demande aucune action de votre part.
+
+Pour toute question sur ce test, contactez Sore Security à ${vars.soreContact} en mentionnant la référence ci-dessus.
+
+— Sore Security, démonstration technique autorisée (${vars.reference})`;
+  const el = document.getElementById('sd-tf-preview');
+  if (el) el.textContent = body;
+}
+
+function spoofDemoOnAuthSelectChange() {
+  const authId = document.getElementById('sd-tf-auth').value;
+  const auth = spoofDemoAuthorizations.find(a => a.id === authId);
+  const destSel = document.getElementById('sd-tf-dest');
+  destSel.innerHTML = (auth?.target_emails || []).map(e => `<option value="${escHtml(e)}">${escHtml(e)}</option>`).join('');
+  spoofDemoRenderPreview();
+}
+
+function openSpoofDemoTestModal() {
+  if (!spoofDemoCanManage()) return;
+  // Ergonomie uniquement : ne proposer que les mandats approuvés ET dans leur
+  // fenêtre. Le formulaire ne peut donc jamais SOUMETTRE une autorisation
+  // invalide — mais createTest() revérifie assertSpoofAuthorized() côté
+  // serveur de toute façon, ce filtre n'est pas la garantie de sécurité.
+  const eligible = spoofDemoAuthorizations.filter(a => spoofDemoAuthCoversNow(a));
+  if (!eligible.length) { showToast("⚠ Aucune autorisation approuvée et dans sa fenêtre de test pour ce client"); return; }
+
+  const modal = document.createElement('div');
+  modal.id = 'spoofdemo-test-overlay';
+  modal.style.cssText = `position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;`;
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;max-width:820px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="closeSpoofDemoTestModal()" style="position:absolute;top:16px;right:16px;background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:24px">NOUVEAU TEST — DÉMONSTRATION SPOOFING</div>
+
+      <div class="sd-test-modal-grid">
+        <div>
+          <div class="form-group"><label class="form-label">Autorisation liée *</label>
+            <select class="form-input" id="sd-tf-auth" onchange="spoofDemoOnAuthSelectChange()">
+              ${eligible.map(a => `<option value="${a.id}">${escHtml(a.reference)} — ${escHtml(a.domain)}</option>`).join('')}
+            </select>
+            <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:5px">Seuls les mandats <span style="color:var(--green)">approuvés</span> et dans leur fenêtre de test apparaissent ici.</div></div>
+
+          <div class="form-group"><label class="form-label">Destination *</label>
+            <select class="form-input" id="sd-tf-dest"></select>
+            <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:5px">Liste fermée de l'autorisation sélectionnée — aucune saisie libre possible.</div></div>
+
+          <div class="form-group"><label class="form-label">Émetteur usurpé (spoofed_from) *</label>
+            <input class="form-input" id="sd-tf-from" type="email" placeholder="dg@domaine-cible.ma"/></div>
+
+          <div class="form-group"><label class="form-label">Objet (généré par le serveur)</label>
+            <input class="form-input" id="sd-tf-subject-preview" readonly/>
+            <div style="font-family:var(--font-mono);font-size:10px;color:var(--cyan);margin-top:5px">Référence injectée automatiquement dans le sujet ET le corps — non supprimable, non modifiable.</div></div>
+
+          <div class="form-group">
+            <label class="form-label">Corps du mail — variables injectées par le serveur</label>
+            <div class="sd-var-chip-row">
+              ${SPOOF_TEMPLATE_VARS.map(v => `<span class="sd-var-chip">{{${v.key}}} · ${escHtml(v.label)}</span>`).join('')}
+            </div>
+            <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:4px">Le corps vient d'un template FIXE, non éditable. Aucun champ de pièce jointe n'existe dans ce formulaire.</div>
+          </div>
+        </div>
+
+        <div>
+          <label class="form-label">Aperçu du message (lecture seule)</label>
+          <div class="sd-template-preview" id="sd-tf-preview"></div>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:20px;margin-top:8px">
+        <button class="action-btn" onclick="closeSpoofDemoTestModal()">Annuler</button>
+        <button class="action-btn primary" id="sd-tf-save-btn" onclick="submitSpoofDemoTest()">Créer le test</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  spoofDemoOnAuthSelectChange();
+  document.getElementById('sd-tf-from').focus();
+}
+function closeSpoofDemoTestModal() { document.getElementById('spoofdemo-test-overlay')?.remove(); }
+
+async function submitSpoofDemoTest() {
+  const authorizationId = document.getElementById('sd-tf-auth').value;
+  const targetEmail = document.getElementById('sd-tf-dest').value;
+  const spoofedFrom = document.getElementById('sd-tf-from').value.trim();
+
+  if (!authorizationId || !targetEmail) { showToast('⚠ Autorisation et destination requises'); return; }
+  if (!spoofedFrom || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(spoofedFrom)) { showToast('⚠ Émetteur usurpé invalide'); return; }
+
+  const btn = document.getElementById('sd-tf-save-btn');
+  btn.disabled = true; btn.textContent = 'Création…';
+  const res = await apiCallEx('/apate/tests', { method: 'POST', body: JSON.stringify({ clientId: spoofDemoSelectedClientId, authorizationId, targetEmail, spoofedFrom }) });
+  btn.disabled = false; btn.textContent = 'Créer le test';
+
+  if (!res.ok) {
+    if (res.data?.code === 'SPOOF_NOT_AUTHORIZED') showToast('⛔ Démonstration non autorisée pour ce destinataire');
+    else showToast('⚠ ' + (res.error || 'Erreur lors de la création du test'));
+    return;
+  }
+  closeSpoofDemoTestModal();
+  showToast('✅ Test créé — statut "pending"');
+  await refreshSpoofDemoTests();
+}
+
+async function sendSpoofDemoTest(id) {
+  if (!spoofDemoCanManage()) return;
+  if (!confirm("Cet envoi ne peut pas être annulé une fois parti. Confirmer ?")) return;
+
+  const res = await apiCallEx(`/apate/tests/${id}/send`, { method: 'POST' });
+  if (!res.ok) {
+    if (res.data?.code === 'SPOOF_NOT_AUTHORIZED') showToast('⛔ Envoi refusé — autorisation invalide ou expirée entre-temps');
+    else showToast('⚠ ' + (res.error || "Échec de l'envoi"));
+    await refreshSpoofDemoTests(); // reflète l'état réel même en cas de refus
+    return;
+  }
+  showToast('✅ Email envoyé — en attente du résultat de livraison');
+  await refreshSpoofDemoTests();
+}
+
+// ── Enregistrement manuel du résultat — pas automatisable (pas d'accès à la boîte du destinataire, voir apate.js recordDeliveryResult) ──
+function openSpoofDemoResultModal(id) {
+  if (!spoofDemoCanManage()) return;
+  const t = spoofDemoTests.find(x => x.id === id);
+  if (!t) return;
+  const modal = document.createElement('div');
+  modal.id = 'spoofdemo-result-overlay';
+  modal.style.cssText = `position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;`;
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;max-width:520px;width:100%;max-height:92vh;overflow-y:auto;padding:32px;position:relative">
+      <button onclick="document.getElementById('spoofdemo-result-overlay').remove()" style="position:absolute;top:16px;right:16px;background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer">✕</button>
+      <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:24px">RÉSULTAT DE LIVRAISON — ${escHtml(t.target_email)}</div>
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-bottom:18px;line-height:1.5">Saisie manuelle après vérification de la boîte du destinataire désigné — Sore Security n'a pas accès à cette boîte, ce résultat ne peut pas être déduit automatiquement.</div>
+
+      <div class="form-group"><label class="form-label">Statut de livraison *</label>
+        <select class="form-input" id="sd-rf-status">
+          <option value="delivered">Delivered — usurpation non bloquée</option>
+          <option value="spam">Spam — placé en indésirables</option>
+          <option value="rejected">Rejected — bloqué par la protection du client</option>
+          <option value="error">Error — anomalie constatée</option>
+        </select></div>
+
+      <div class="form-group"><label class="form-label">En-têtes Authentication-Results (collés depuis le mail reçu)</label>
+        <textarea class="form-input" id="sd-rf-headers" rows="5" placeholder="spf=fail smtp.mailfrom=... ; dkim=none ; dmarc=fail action=quarantine header.from=..."></textarea></div>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:20px;margin-top:8px">
+        <button class="action-btn" onclick="document.getElementById('spoofdemo-result-overlay').remove()">Annuler</button>
+        <button class="action-btn primary" onclick="submitSpoofDemoResult('${id}')">Enregistrer</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+async function submitSpoofDemoResult(id) {
+  const status = document.getElementById('sd-rf-status').value;
+  const raw = document.getElementById('sd-rf-headers').value.trim();
+  const res = await apiCallEx(`/apate/tests/${id}/result`, { method: 'PATCH', body: JSON.stringify({ status, authenticationResults: { raw } }) });
+  if (!res.ok) { showToast('⚠ ' + (res.error || "Échec de l'enregistrement")); return; }
+  document.getElementById('spoofdemo-result-overlay')?.remove();
+  showToast('✅ Résultat enregistré');
+  await refreshSpoofDemoTests();
 }
 
 // ════════════════════════════════════════════
