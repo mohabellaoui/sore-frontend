@@ -2536,10 +2536,10 @@ async function loadSOC() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">#INC-${String(90-i).padStart(3,'0')}</td>
-      <td>${a.title || 'Intrusion détectée'}</td>
-      <td><span class="sev-badge ${a.severity||'medium'}">${a.severity||'MEDIUM'}</span></td>
-      <td><span class="status-pill ${a.status||'open'}">${a.status||'open'}</span></td>
-      <td style="font-family:var(--font-mono);font-size:11px">${a.analyst_name||'Auto-SIEM'}</td>
+      <td>${escHtml(a.title || 'Intrusion détectée')}</td>
+      <td><span class="sev-badge ${escHtml(a.severity||'medium')}">${escHtml(a.severity||'MEDIUM')}</span></td>
+      <td><span class="status-pill ${escHtml(a.status||'open')}">${escHtml(a.status||'open')}</span></td>
+      <td style="font-family:var(--font-mono);font-size:11px">${escHtml(a.analyst_name||'Auto-SIEM')}</td>
       <td style="display:flex;gap:6px">
         <button class="icon-btn" onclick="showToast('✓ Incident assigné')">▶</button>
         <button class="icon-btn" style="color:var(--cyan);border-color:var(--cyan)"
@@ -2549,7 +2549,7 @@ async function loadSOC() {
         <button class="icon-btn" style="color:var(--amber);border-color:var(--amber)"
           onclick="launchPlaybookForAlert(${i})" title="Lancer le playbook associé">🎭</button>
         <button class="icon-btn" style="color:var(--red);border-color:var(--red)"
-          onclick="checkAlertIP('${a.ip_address || ''}')" title="Vérifier IP (ORACLE)">🔮</button>
+          onclick="checkAlertIP(${jsArg(a.ip_address || '')})" title="Vérifier IP (ORACLE)">🔮</button>
       </td>`;
     tbody.appendChild(tr);
   });
@@ -2614,26 +2614,26 @@ function renderLogsTable(res) {
     const msg = (log.raw_message || '').length > 60 ? log.raw_message.slice(0, 60) + '…' : (log.raw_message || '');
     const oracleData = log.normalized?.oracle;
     const oracleBadge = oracleData
-      ? `<span onclick="event.stopPropagation();showOracleForLog(${i})" title="ORACLE — ${oracleData.riskLevel} · score ${oracleData.abuseScore}/100"
+      ? `<span onclick="event.stopPropagation();showOracleForLog(${i})" title="ORACLE — ${escHtml(oracleData.riskLevel)} · score ${oracleData.abuseScore}/100"
            style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:6px;cursor:pointer;vertical-align:middle;
                   background:${oracleData.abuseScore > 70 ? 'var(--red)' : oracleData.abuseScore >= 20 ? 'var(--amber)' : 'var(--green)'}"></span>`
       : '';
     const iocData = log.normalized?.ioc_match;
     const iocBadge = iocData
-      ? `<span onclick="event.stopPropagation();showLogDetail(${i})" title="IOC Match — ${iocData.threatType || 'menace'} · ${iocData.source}"
+      ? `<span onclick="event.stopPropagation();showLogDetail(${i})" title="IOC Match — ${escHtml(iocData.threatType || 'menace')} · ${escHtml(iocData.source)}"
            style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;cursor:pointer;vertical-align:middle;
                   background:var(--red-dim);color:var(--red);border:1px solid var(--red);border-radius:4px;
                   padding:1px 6px;font-size:9px;font-family:var(--font-mono);font-weight:700">🛰 IOC</span>`
       : '';
     tr.innerHTML = `
       <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);white-space:nowrap">${time}</td>
-      <td style="font-family:var(--font-mono);font-size:11px">${log.source || '—'}</td>
-      <td style="font-family:var(--font-mono);font-size:11px">${log.host || '—'}</td>
-      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${log.ip_address || '—'}${oracleBadge}${iocBadge}</td>
-      <td style="font-family:var(--font-mono);font-size:11px">${log.log_type || '—'}</td>
-      <td><span class="sev-badge ${log.severity || 'info'}">${(log.severity || 'info').toUpperCase()}</span></td>
-      <td style="font-family:var(--font-mono);font-size:11px;color:${log.use_case_matched ? 'var(--red)' : 'var(--text-dim)'}">${log.use_case_matched || '—'}</td>
-      <td style="font-size:12px;color:var(--text-dim);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(log.raw_message||'').replace(/"/g,'&quot;')}">${msg}</td>
+      <td style="font-family:var(--font-mono);font-size:11px">${escHtml(log.source || '—')}</td>
+      <td style="font-family:var(--font-mono);font-size:11px">${escHtml(log.host || '—')}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(log.ip_address || '—')}${oracleBadge}${iocBadge}</td>
+      <td style="font-family:var(--font-mono);font-size:11px">${escHtml(log.log_type || '—')}</td>
+      <td><span class="sev-badge ${escHtml(log.severity || 'info')}">${escHtml((log.severity || 'info').toUpperCase())}</span></td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:${log.use_case_matched ? 'var(--red)' : 'var(--text-dim)'}">${escHtml(log.use_case_matched || '—')}</td>
+      <td style="font-size:12px;color:var(--text-dim);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(log.raw_message||'')}">${escHtml(msg)}</td>
       <td><button class="icon-btn" onclick="event.stopPropagation();showLogDetail(${i})" title="Voir le détail">👁</button></td>`;
     tbody.appendChild(tr);
   });
@@ -2664,7 +2664,7 @@ function buildProgressList(container, rows, labelKey, color) {
     d.className = 'progress-row';
     const pct = Math.round(((+r.count || 0) / max) * 100);
     d.innerHTML = `
-      <div class="progress-header"><span class="progress-label">${r[labelKey]}</span><span class="progress-val">${r.count}</span></div>
+      <div class="progress-header"><span class="progress-label">${escHtml(r[labelKey])}</span><span class="progress-val">${r.count}</span></div>
       <div class="progress-track"><div class="progress-fill" style="width:${pct}%;background:linear-gradient(90deg,${color},${color})"></div></div>`;
     container.appendChild(d);
   });
@@ -2700,28 +2700,28 @@ function showLogDetail(index) {
 
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
         <div style="font-size:11px;letter-spacing:3px;color:var(--cyan)">DÉTAIL DU LOG</div>
-        <span class="sev-badge ${log.severity || 'info'}">${(log.severity || 'info').toUpperCase()}</span>
-        ${log.use_case_matched ? `<span style="margin-left:auto;background:var(--red-dim);color:var(--red);padding:3px 10px;border-radius:4px;font-size:11px">${log.use_case_matched}</span>` : ''}
+        <span class="sev-badge ${escHtml(log.severity || 'info')}">${escHtml((log.severity || 'info').toUpperCase())}</span>
+        ${log.use_case_matched ? `<span style="margin-left:auto;background:var(--red-dim);color:var(--red);padding:3px 10px;border-radius:4px;font-size:11px">${escHtml(log.use_case_matched)}</span>` : ''}
       </div>
 
       <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px;margin-bottom:16px">
-        <p style="color:var(--text-bright);font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word">${(log.raw_message||'').replace(/</g,'&lt;')}</p>
+        <p style="color:var(--text-bright);font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word">${escHtml(log.raw_message||'')}</p>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
         <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px">
           <div style="font-size:11px;color:var(--cyan);letter-spacing:2px;margin-bottom:12px">CONTEXTE</div>
           <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Timestamp : <span style="color:var(--text)">${new Date(log.timestamp).toLocaleString('fr-FR')}</span></div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Source : <span style="color:var(--text)">${log.source||'—'}</span></div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Host : <span style="color:var(--text)">${log.host||'—'}</span></div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">IP : <span style="color:var(--text)">${log.ip_address||'—'}</span></div>
-          <div style="font-size:12px;color:var(--text-dim)">Type : <span style="color:var(--text)">${log.log_type||'—'}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Source : <span style="color:var(--text)">${escHtml(log.source||'—')}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Host : <span style="color:var(--text)">${escHtml(log.host||'—')}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">IP : <span style="color:var(--text)">${escHtml(log.ip_address||'—')}</span></div>
+          <div style="font-size:12px;color:var(--text-dim)">Type : <span style="color:var(--text)">${escHtml(log.log_type||'—')}</span></div>
         </div>
         <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px">
           <div style="font-size:11px;color:var(--red);letter-spacing:2px;margin-bottom:12px">DÉTECTION</div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Use case : <span style="color:var(--text)">${log.use_case_matched||'Aucun'}</span></div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Tactique MITRE : <span style="color:var(--text)">${log.mitre_tactic||'N/A'}</span></div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Technique MITRE : <span style="color:var(--cyan);font-family:monospace">${log.mitre_technique||'N/A'}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Use case : <span style="color:var(--text)">${escHtml(log.use_case_matched||'Aucun')}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Tactique MITRE : <span style="color:var(--text)">${escHtml(log.mitre_tactic||'N/A')}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Technique MITRE : <span style="color:var(--cyan);font-family:monospace">${escHtml(log.mitre_technique||'N/A')}</span></div>
           <div style="font-size:12px;color:var(--text-dim)">Alerte liée : <span style="color:var(--text)">${log.alert_id ? '#' + log.alert_id.slice(0,8) : 'Aucune'}</span></div>
         </div>
       </div>
@@ -2733,13 +2733,13 @@ function showLogDetail(index) {
           <span style="margin-left:auto;font-size:16px;font-weight:700;color:${c}">${o.abuseScore}<span style="font-size:10px;color:var(--text-dim)">/100</span></span>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;color:var(--text-dim);margin-bottom:10px">
-          <div>Pays : <span style="color:var(--text)">${o.country || '—'}</span></div>
-          <div>ISP : <span style="color:var(--text)">${o.isp || '—'}</span></div>
+          <div>Pays : <span style="color:var(--text)">${escHtml(o.country || '—')}</span></div>
+          <div>ISP : <span style="color:var(--text)">${escHtml(o.isp || '—')}</span></div>
           <div>Proxy/VPN : <span style="color:var(--text)">${o.isProxy ? 'Oui' : 'Non'}</span></div>
           <div>Tor : <span style="color:var(--text)">${o.isTor ? 'Oui' : 'Non'}</span></div>
         </div>
-        ${(o.tags || []).length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">${o.tags.map(t => `<span style="background:var(--surface);border:1px solid var(--line);color:var(--text-dim);padding:2px 8px;border-radius:4px;font-size:10px;font-family:monospace">${t}</span>`).join('')}</div>` : ''}
-        <div style="font-size:12px;color:var(--text-bright);font-weight:600">${o.recommendation}</div>
+        ${(o.tags || []).length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">${o.tags.map(t => `<span style="background:var(--surface);border:1px solid var(--line);color:var(--text-dim);padding:2px 8px;border-radius:4px;font-size:10px;font-family:monospace">${escHtml(t)}</span>`).join('')}</div>` : ''}
+        <div style="font-size:12px;color:var(--text-bright);font-weight:600">${escHtml(o.recommendation)}</div>
       </div>
       `; })() : ''}
 
@@ -2747,13 +2747,13 @@ function showLogDetail(index) {
       <div style="background:var(--red-dim);border:1px solid var(--red);border-radius:6px;padding:16px;margin-bottom:16px">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
           <div style="font-size:11px;color:var(--red);letter-spacing:2px">🛰 IOC MATCH (MISP)</div>
-          <span style="margin-left:auto"><span class="sev-badge ${m.severity}">${(m.severity||'').toUpperCase()}</span></span>
+          <span style="margin-left:auto"><span class="sev-badge ${escHtml(m.severity)}">${escHtml((m.severity||'').toUpperCase())}</span></span>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;color:var(--text-dim);margin-bottom:10px">
-          <div>Type de menace : <span style="color:var(--text)">${m.threatType || '—'}</span></div>
+          <div>Type de menace : <span style="color:var(--text)">${escHtml(m.threatType || '—')}</span></div>
           <div>Confiance : <span style="color:var(--text)">${m.confidence ?? '—'}/100</span></div>
-          <div>Source : <span style="color:var(--text)">${m.source || '—'}</span></div>
-          <div>Événement MISP : <span style="color:var(--text)">${m.mispEventId || '—'}</span></div>
+          <div>Source : <span style="color:var(--text)">${escHtml(m.source || '—')}</span></div>
+          <div>Événement MISP : <span style="color:var(--text)">${escHtml(m.mispEventId || '—')}</span></div>
         </div>
         ${m.mispEventInfo ? `<div style="font-size:12px;color:var(--text-bright);margin-bottom:10px">${escHtml(m.mispEventInfo)}</div>` : ''}
         ${(m.tags || []).length ? `<div style="display:flex;flex-wrap:wrap;gap:6px">${m.tags.map(t => `<span style="background:var(--surface);border:1px solid var(--line);color:var(--text-dim);padding:2px 8px;border-radius:4px;font-size:10px;font-family:monospace">${escHtml(t)}</span>`).join('')}</div>` : ''}
@@ -2910,8 +2910,17 @@ let ucClientsCache = [];
 let ucEditingId = null;
 let ucEditingOriginal = null;
 
-function escAttr(s) { return String(s == null ? '' : s).replace(/"/g, '&quot;'); }
-function escHtml(s) { return String(s == null ? '' : s).replace(/</g, '&lt;'); }
+function escAttr(s) { return escHtml(s); }
+// Échappement HTML complet — valable en contenu ET en valeur d'attribut entre guillemets.
+// `&` en PREMIER (sinon les entités produites ensuite seraient ré-échappées).
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+// Argument de chaîne pour un gestionnaire inline (onclick="f(${jsArg(x)})") : littéral JS
+// (JSON.stringify) PUIS échappement HTML — l'échappement HTML seul ne protège pas du JS.
+function jsArg(s) { return escHtml(JSON.stringify(String(s == null ? '' : s))); }
 
 async function loadUseCases() {
   const [ucRes, clientsRes] = await Promise.all([
@@ -2962,7 +2971,7 @@ function renderUseCasesTable() {
       </td>
       <td style="display:flex;gap:6px">
         <button class="icon-btn" onclick="openUseCaseModal('${uc.id}')" title="Modifier">✎</button>
-        <button class="icon-btn" style="color:var(--red);border-color:rgba(255,45,85,.3)" onclick="deleteUseCase('${uc.id}','${escAttr(uc.name)}')" title="Supprimer">🗑</button>
+        <button class="icon-btn" style="color:var(--red);border-color:rgba(255,45,85,.3)" onclick="deleteUseCase('${uc.id}',${jsArg(uc.name)})" title="Supprimer">🗑</button>
       </td>`;
     tbody.appendChild(tr);
   });
@@ -4638,7 +4647,7 @@ function renderArgusScopeTable() {
         actions = `<button class="action-btn primary" onclick="approveArgusScope('${s.id}')">Approuver</button>
                    <button class="action-btn" onclick="rejectArgusScope('${s.id}')">Rejeter</button>`;
       } else if (s.status === 'approved') {
-        actions = `<button class="action-btn" onclick="launchArgusScan('${s.id}','${escHtml(s.asset_value)}')">▶ Lancer un scan</button>`;
+        actions = `<button class="action-btn" onclick="launchArgusScan('${s.id}',${jsArg(s.asset_value)})">▶ Lancer un scan</button>`;
       }
     }
     tr.innerHTML = `
@@ -8122,7 +8131,7 @@ function chronicleResultBadge(result) {
     partial: { color: 'var(--amber)', bg: 'var(--amber-dim)' },
   }[result] || { color: 'var(--text-dim)', bg: 'rgba(100,100,100,.15)' };
   return `<span style="background:${cfg.bg};color:${cfg.color};border:1px solid ${cfg.color};
-    border-radius:4px;padding:2px 8px;font-size:10px;font-family:var(--font-mono);text-transform:uppercase">${result}</span>`;
+    border-radius:4px;padding:2px 8px;font-size:10px;font-family:var(--font-mono);text-transform:uppercase">${escHtml(result)}</span>`;
 }
 
 function renderChronicleTable(res) {
@@ -8323,25 +8332,25 @@ function displayOracleResult(data) {
 
       <div style="font-size:11px;letter-spacing:3px;color:var(--cyan);margin-bottom:20px">🔮 ORACLE — THREAT INTEL</div>
 
-      <div style="font-family:var(--font-mono);font-size:16px;color:var(--text-bright);margin-bottom:4px">${data.ip || data.domain}</div>
+      <div style="font-family:var(--font-mono);font-size:16px;color:var(--text-bright);margin-bottom:4px">${escHtml(data.ip || data.domain)}</div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
         <span style="font-size:28px;font-weight:700;color:${color}">${data.abuseScore}</span>
         <span style="font-size:11px;color:var(--text-dim)">/100 abuse score</span>
-        <span style="margin-left:auto;background:${color};color:#000;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;text-transform:uppercase">${data.riskLevel}</span>
+        <span style="margin-left:auto;background:${color};color:#000;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;text-transform:uppercase">${escHtml(data.riskLevel)}</span>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-        <div><div style="font-size:10px;color:var(--text-dim)">PAYS</div><div style="font-size:13px;color:var(--text)">${data.country || '—'}</div></div>
-        <div><div style="font-size:10px;color:var(--text-dim)">ISP</div><div style="font-size:13px;color:var(--text)">${data.isp || '—'}</div></div>
+        <div><div style="font-size:10px;color:var(--text-dim)">PAYS</div><div style="font-size:13px;color:var(--text)">${escHtml(data.country || '—')}</div></div>
+        <div><div style="font-size:10px;color:var(--text-dim)">ISP</div><div style="font-size:13px;color:var(--text)">${escHtml(data.isp || '—')}</div></div>
         <div><div style="font-size:10px;color:var(--text-dim)">PROXY/VPN</div><div style="font-size:13px;color:var(--text)">${data.isProxy ? 'Oui' : 'Non'}</div></div>
         <div><div style="font-size:10px;color:var(--text-dim)">TOR</div><div style="font-size:13px;color:var(--text)">${data.isTor ? 'Oui' : 'Non'}</div></div>
       </div>
 
-      ${(data.tags || []).length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">${data.tags.map(t => `<span style="background:var(--elevated);border:1px solid var(--line);color:var(--text-dim);padding:3px 8px;border-radius:4px;font-size:10px;font-family:monospace">${t}</span>`).join('')}</div>` : ''}
+      ${(data.tags || []).length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">${data.tags.map(t => `<span style="background:var(--elevated);border:1px solid var(--line);color:var(--text-dim);padding:3px 8px;border-radius:4px;font-size:10px;font-family:monospace">${escHtml(t)}</span>`).join('')}</div>` : ''}
 
       <div style="background:var(--elevated);border:1px solid ${color};border-radius:6px;padding:14px">
         <div style="font-size:10px;color:${color};letter-spacing:2px;margin-bottom:6px">RECOMMANDATION</div>
-        <div style="font-size:13px;color:var(--text-bright);font-weight:600">${data.recommendation}</div>
+        <div style="font-size:13px;color:var(--text-bright);font-weight:600">${escHtml(data.recommendation)}</div>
       </div>
     </div>
   `;
@@ -8944,23 +8953,23 @@ function displaySageResults(res) {
       ${ok.map(c => `
         <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:20px;margin-bottom:16px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-            <div style="font-size:14px;color:var(--text-bright);font-weight:600">${c.clientName}</div>
-            <div style="font-size:22px;font-weight:700;color:${levelColor[c.globalLevel] || 'var(--cyan)'}">${c.globalScore}<span style="font-size:11px;color:var(--text-dim)">/100 · ${c.globalLevel}</span></div>
+            <div style="font-size:14px;color:var(--text-bright);font-weight:600">${escHtml(c.clientName)}</div>
+            <div style="font-size:22px;font-weight:700;color:${levelColor[c.globalLevel] || 'var(--cyan)'}">${c.globalScore}<span style="font-size:11px;color:var(--text-dim)">/100 · ${escHtml(c.globalLevel)}</span></div>
           </div>
           <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px">
             ${Object.entries(c.report.frameworks).map(([key, f]) => `
               <div style="background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:10px 12px">
-                <div style="font-size:10px;color:var(--text-dim);letter-spacing:.04em;margin-bottom:4px">${fwLabels[key] || key.toUpperCase()}</div>
+                <div style="font-size:10px;color:var(--text-dim);letter-spacing:.04em;margin-bottom:4px">${escHtml(fwLabels[key] || key.toUpperCase())}</div>
                 <div style="font-size:16px;font-weight:700;color:${levelColor[f.level] || 'var(--cyan)'}">${f.score}<span style="font-size:10px;color:var(--text-dim)">/100</span></div>
               </div>
             `).join('')}
           </div>
-          <p style="font-size:12px;color:var(--text-dim);margin-bottom:10px">${c.report.analysis.executiveSummary}</p>
+          <p style="font-size:12px;color:var(--text-dim);margin-bottom:10px">${escHtml(c.report.analysis.executiveSummary)}</p>
           ${(c.report.analysis.recommendations || []).length ? `
             <div style="font-size:10px;color:var(--amber);letter-spacing:.04em;margin-bottom:6px">RECOMMANDATIONS</div>
             ${c.report.analysis.recommendations.map(r => `
               <div style="font-size:11px;color:var(--text);padding:4px 0;border-top:1px solid var(--line)">
-                <strong>[${r.framework}]</strong> ${r.action} ${r.deadline ? `<span style="color:var(--text-dim)">(${r.deadline})</span>` : ''}
+                <strong>[${escHtml(r.framework)}]</strong> ${escHtml(r.action)} ${r.deadline ? `<span style="color:var(--text-dim)">(${escHtml(r.deadline)})</span>` : ''}
               </div>
             `).join('')}
           ` : ''}
@@ -9029,12 +9038,12 @@ function displayHunterResults(res) {
 
       ${clientsWithHits.map(client => `
         <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px;margin-bottom:12px">
-          <div style="font-size:13px;color:var(--text-bright);font-weight:600;margin-bottom:10px">${client.clientName}</div>
+          <div style="font-size:13px;color:var(--text-bright);font-weight:600;margin-bottom:10px">${escHtml(client.clientName)}</div>
           ${client.correlations.map(c => `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--line)">
               <div>
-                <div style="font-size:12px;color:var(--text)">${c.pattern.replace(/_/g,' ')}</div>
-                <div style="font-size:11px;color:var(--text-dim);margin-top:2px">${(c.mitre_tactics||[]).join(', ')}</div>
+                <div style="font-size:12px;color:var(--text)">${escHtml(c.pattern.replace(/_/g,' '))}</div>
+                <div style="font-size:11px;color:var(--text-dim);margin-top:2px">${escHtml((c.mitre_tactics||[]).join(', '))}</div>
               </div>
               <span style="color:${sevColor[c.severity]||'var(--cyan)'};font-size:11px;font-weight:700;text-transform:uppercase">${c.severity}</span>
             </div>
@@ -9105,27 +9114,27 @@ function displaySentinelTriage(triage) {
         <div style="margin-left:auto;font-size:28px;font-weight:700;color:${riskColor}">${triage.riskScore}<span style="font-size:14px;color:var(--text-dim)">/100</span></div>
       </div>
 
-      <p style="color:var(--text-bright);font-size:15px;margin-bottom:24px">${triage.summary}</p>
+      <p style="color:var(--text-bright);font-size:15px;margin-bottom:24px">${escHtml(triage.summary)}</p>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
         <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px">
           <div style="font-size:11px;color:var(--green);letter-spacing:2px;margin-bottom:12px">CLASSIFICATION</div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Sévérité : <span style="color:var(--text);font-weight:600">${triage.confirmedSeverity?.toUpperCase()}</span></div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Priorité : <span style="color:var(--text)">P${triage.priority}</span></div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Tactique : <span style="color:var(--text)">${triage.mitreTactic}</span></div>
-          <div style="font-size:12px;color:var(--text-dim)">Technique : <span style="color:var(--cyan);font-family:monospace">${triage.mitreTechnique}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Sévérité : <span style="color:var(--text);font-weight:600">${escHtml(triage.confirmedSeverity?.toUpperCase())}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Priorité : <span style="color:var(--text)">P${escHtml(triage.priority)}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Tactique : <span style="color:var(--text)">${escHtml(triage.mitreTactic)}</span></div>
+          <div style="font-size:12px;color:var(--text-dim)">Technique : <span style="color:var(--cyan);font-family:monospace">${escHtml(triage.mitreTechnique)}</span></div>
         </div>
         <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px">
           <div style="font-size:11px;color:var(--green);letter-spacing:2px;margin-bottom:12px">RÉPONSE AUTOMATIQUE</div>
           <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Possible : <span style="color:${triage.autoResponse?.possible?'var(--green)':'var(--red)'}">${triage.autoResponse?.possible ? '✓ Oui' : '✗ Non'}</span></div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Action : <span style="color:var(--text)">${triage.autoResponse?.action || 'Intervention humaine requise'}</span></div>
-          <div style="font-size:12px;color:var(--text-dim)">Escalade : <span style="color:var(--amber)">${triage.escalateTo}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Action : <span style="color:var(--text)">${escHtml(triage.autoResponse?.action || 'Intervention humaine requise')}</span></div>
+          <div style="font-size:12px;color:var(--text-dim)">Escalade : <span style="color:var(--amber)">${escHtml(triage.escalateTo)}</span></div>
         </div>
       </div>
 
       <div style="background:var(--elevated);border:1px solid var(--amber);border-radius:6px;padding:16px;margin-bottom:20px">
         <div style="font-size:11px;color:var(--amber);letter-spacing:2px;margin-bottom:8px">ACTION IMMÉDIATE</div>
-        <p style="color:var(--text-bright);font-size:14px;font-weight:600">${triage.immediateAction}</p>
+        <p style="color:var(--text-bright);font-size:14px;font-weight:600">${escHtml(triage.immediateAction)}</p>
       </div>
 
       <div style="margin-bottom:20px">
@@ -9134,7 +9143,7 @@ function displaySentinelTriage(triage) {
           ${(triage.tags || []).map(tag => `
             <span style="background:var(--elevated);border:1px solid var(--line);
                          color:var(--text-dim);padding:4px 10px;border-radius:4px;font-size:11px;
-                         font-family:monospace">${tag}</span>
+                         font-family:monospace">${escHtml(tag)}</span>
           `).join('')}
         </div>
       </div>
@@ -9142,7 +9151,7 @@ function displaySentinelTriage(triage) {
       <div style="display:flex;justify-content:space-between;align-items:center;
                   border-top:1px solid var(--line);padding-top:16px">
         <div style="font-size:11px;color:var(--text-dim)">
-          SENTINEL v${triage.metadata?.agentVersion?.split('-')[1] || '1.0'} · ${triage.metadata?.engine}
+          SENTINEL v${triage.metadata?.agentVersion?.split('-')[1] || '1.0'} · ${escHtml(triage.metadata?.engine)}
         </div>
         <button onclick="this.closest('[style*=fixed]').remove()"
           style="background:var(--green-dim);color:var(--green);border:1px solid var(--green);
@@ -9202,34 +9211,34 @@ function displayScribeReport(report) {
 
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px">
         <div style="font-size:11px;letter-spacing:3px;color:var(--cyan)">SCRIBE REPORT</div>
-        <div style="font-size:11px;color:var(--text-dim)">${report.reportId}</div>
+        <div style="font-size:11px;color:var(--text-dim)">${escHtml(report.reportId)}</div>
         <div style="margin-left:auto;background:var(--red-dim);color:var(--red);
                     padding:4px 12px;border-radius:4px;font-size:11px;font-weight:700">
-          ${ex?.riskLevel || 'N/A'}
+          ${escHtml(ex?.riskLevel || 'N/A')}
         </div>
       </div>
 
-      <h2 style="font-size:18px;color:var(--text-bright);margin-bottom:8px">${ex?.headline || ''}</h2>
-      <p style="color:var(--text-dim);font-size:13px;margin-bottom:24px">${ex?.businessImpact || ''}</p>
+      <h2 style="font-size:18px;color:var(--text-bright);margin-bottom:8px">${escHtml(ex?.headline || '')}</h2>
+      <p style="color:var(--text-dim);font-size:13px;margin-bottom:24px">${escHtml(ex?.businessImpact || '')}</p>
 
       <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;
                   padding:16px;margin-bottom:20px">
         <div style="font-size:11px;color:var(--cyan);letter-spacing:2px;margin-bottom:12px">ACTION IMMÉDIATE</div>
-        <p style="color:var(--amber);font-size:14px;font-weight:600">${ex?.immediateAction || ''}</p>
+        <p style="color:var(--amber);font-size:14px;font-weight:600">${escHtml(ex?.immediateAction || '')}</p>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
         <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px">
           <div style="font-size:11px;color:var(--cyan);letter-spacing:2px;margin-bottom:12px">ANALYSE TECHNIQUE</div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Type : <span style="color:var(--text)">${tech?.incidentType || ''}</span></div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Vecteur : <span style="color:var(--text)">${tech?.attackVector || ''}</span></div>
-          <div style="font-size:12px;color:var(--text-dim)">Cause : <span style="color:var(--text)">${tech?.rootCause || ''}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Type : <span style="color:var(--text)">${escHtml(tech?.incidentType || '')}</span></div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Vecteur : <span style="color:var(--text)">${escHtml(tech?.attackVector || '')}</span></div>
+          <div style="font-size:12px;color:var(--text-dim)">Cause : <span style="color:var(--text)">${escHtml(tech?.rootCause || '')}</span></div>
         </div>
         <div style="background:var(--elevated);border:1px solid var(--line);border-radius:6px;padding:16px">
           <div style="font-size:11px;color:var(--cyan);letter-spacing:2px;margin-bottom:12px">CONFORMITÉ</div>
           <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">RGPD : <span style="color:${comp?.rgpdImpact?'var(--red)':'var(--green)'}">${comp?.rgpdImpact ? '⚠ Impact' : '✓ Non impacté'}</span></div>
           <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">CNDP : <span style="color:${comp?.cndpNotification?'var(--red)':'var(--green)'}">${comp?.cndpNotification ? '⚠ Notification requise' : '✓ Non requis'}</span></div>
-          <div style="font-size:12px;color:var(--text-dim)">ISO : <span style="color:var(--text)">${comp?.isoControl || ''}</span></div>
+          <div style="font-size:12px;color:var(--text-dim)">ISO : <span style="color:var(--text)">${escHtml(comp?.isoControl || '')}</span></div>
         </div>
       </div>
 
@@ -9238,10 +9247,10 @@ function displayScribeReport(report) {
         ${(recs?.immediate || []).map(r => `
           <div style="display:flex;align-items:start;gap:12px;margin-bottom:10px">
             <div style="background:var(--red-dim);color:var(--red);padding:2px 8px;
-                        border-radius:4px;font-size:11px;font-weight:700;white-space:nowrap">P${r.priority}</div>
+                        border-radius:4px;font-size:11px;font-weight:700;white-space:nowrap">P${escHtml(r.priority)}</div>
             <div>
-              <div style="font-size:13px;color:var(--text)">${r.action}</div>
-              <div style="font-size:11px;color:var(--text-dim)">${r.responsible} · ${r.deadline}</div>
+              <div style="font-size:13px;color:var(--text)">${escHtml(r.action)}</div>
+              <div style="font-size:11px;color:var(--text-dim)">${escHtml(r.responsible)} · ${escHtml(r.deadline)}</div>
             </div>
           </div>
         `).join('')}
@@ -9251,7 +9260,7 @@ function displayScribeReport(report) {
                   border-top:1px solid var(--line);padding-top:16px">
         <div style="font-size:11px;color:var(--text-dim)">
           Généré par SCRIBE v${report.metadata?.agentVersion?.split('-')[1] || '1.0'} · 
-          ${report.metadata?.engine || 'IA Sore Security'}
+          ${escHtml(report.metadata?.engine || 'IA Sore Security')}
         </div>
         <button onclick="this.closest('[style*=fixed]').remove()"
           style="background:var(--cyan-dim);color:var(--cyan);border:1px solid var(--cyan);
@@ -9281,13 +9290,13 @@ function buildAlertItem(a) {
   const icons = {critical:'🔴',high:'🟠',medium:'🟡',low:'🔵',info:'⚪'};
   const time = new Date(a.created_at).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
   div.innerHTML = `
-    <div class="alert-sev ${a.severity||'medium'}"></div>
+    <div class="alert-sev ${escHtml(a.severity||'medium')}"></div>
     <div class="alert-icon">${icons[a.severity]||'⚪'}</div>
     <div class="alert-body">
-      <div class="alert-title-t">${a.title}</div>
-      <div class="alert-meta-t">${a.source||'SOC'} · ${a.ip_address||'N/A'} · ${time}</div>
+      <div class="alert-title-t">${escHtml(a.title)}</div>
+      <div class="alert-meta-t">${escHtml(a.source||'SOC')} · ${escHtml(a.ip_address||'N/A')} · ${time}</div>
     </div>
-    <div class="alert-right"><span class="sev-badge ${a.severity||'medium'}">${(a.severity||'medium').toUpperCase()}</span></div>`;
+    <div class="alert-right"><span class="sev-badge ${escHtml(a.severity||'medium')}">${escHtml((a.severity||'medium').toUpperCase())}</span></div>`;
   return div;
 }
 
@@ -9543,7 +9552,7 @@ function addMsg(role, text) {
   const time = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
   const el = document.createElement('div');
   el.className = `msg ${role}`;
-  el.innerHTML = `<div class="msg-bubble">${text.replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')}</div><div class="msg-time">${role==='user'?'Vous':'ARIA'} · ${time}</div>`;
+  el.innerHTML = `<div class="msg-bubble">${escHtml(text).replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')}</div><div class="msg-time">${role==='user'?'Vous':'ARIA'} · ${time}</div>`;
   msgs.appendChild(el);
   msgs.scrollTop = msgs.scrollHeight;
 }
@@ -11021,7 +11030,7 @@ function heliosStopPolling() {
 let toastTimer;
 function showToast(msg) {
   const t = document.getElementById('toast');
-  t.innerHTML = '⬡ ' + msg;
+  t.textContent = '⬡ ' + msg;
   t.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove('show'), 4000);
