@@ -60,15 +60,37 @@ check "ON CONFLICT sur external_assets (pas de contrainte UNIQUE)" \
       'external_assets[^;]*ON CONFLICT'
 # SQL concaténé : on retire d'abord les interpolations sûres, puis on cherche un ${...} restant.
 #  - $${params.push(x)} / $${values.length}  → génère un placeholder $N (sûr)
+#    (uniquement params/values : un $${req.body.x} reste une injection, préfixée d'un $)
 #  - ${where} / ${whereClause} / ${ownerCheck} → clauses construites uniquement de placeholders $N
+#    (garanti par le contrôle « clause SQL dynamique » ci-dessous)
 #  - ${CONSTANTE_MAJUSCULE}                  → constante définie dans le code
 #  - ${idx} / ${i} / ${n} / ${paramIndex} / ${p} → index de placeholder
 # (seuls les template literals interpolent : on cible query(`...`), apostrophes SQL autorisées dedans)
+SAFE_PLACEHOLDER_SED='s/\$\$\{(params|values)\.(push\([^}]*\)|length)\}//g'
 out=$(grep -nHE "query\(\`[^\`]*(SELECT|UPDATE|DELETE|INSERT)[^\`]*\\$\{" "${FILES[@]}" 2>/dev/null \
   | grep -vE "$COMMENT_RE" \
-  | sed -E 's/\$\$\{[^}]*\}//g; s/\$\{(where|whereClause|ownerCheck|[A-Z][A-Z0-9_]*|idx|i|n|paramIndex|p)\}//g' \
+  | sed -E "$SAFE_PLACEHOLDER_SED" \
+  | sed -E 's/\$\{(where|whereClause|ownerCheck|[A-Z][A-Z0-9_]*|idx|i|n|paramIndex|p)\}//g' \
   | grep -E "query\(\`[^\`]*\\$\{")
 report "SQL concaténé (risque injection) — préférer \$1, \$2" "$out"
+
+# Clause SQL dynamique : la liste blanche ci-dessus n'est sûre que si where / whereClause /
+# ownerCheck (et le tableau conditions dont ils sont faits) ne contiennent que des littéraux,
+# des $${params|values.push(...)} et des ${conditions.join(...)}.
+# WARN si une affectation / concaténation / conditions.push contient un autre ${...}
+# ou concatène (+) un identifiant autre que conditions.join(...).
+# Limite : analyse ligne à ligne (un template multi-lignes n'est vu que sur sa 1re ligne).
+out=$(grep -nHE '(^|[^A-Za-z0-9_.])(where|whereClause|ownerCheck)[[:space:]]*\+?=[^=]|(^|[^A-Za-z0-9_.])conditions[[:space:]]*(=[^=]|\.push\(|\.unshift\()' "${FILES[@]}" 2>/dev/null \
+  | grep -vE "$COMMENT_RE" \
+  | sed -E "$SAFE_PLACEHOLDER_SED" \
+  | sed -E 's/\$\{conditions\.join\([^}]*\)\}//g' \
+  | awk '{ line = $0; body = $0
+           sub(/^[^:]+:[0-9]+:/, "", body)
+           gsub(/conditions\.join\([^)]*\)/, "", body)
+           if (body ~ /\$\{/) { print line; next }
+           gsub(/`[^`]*`/, "", body); gsub(/\047[^\047]*\047/, "", body); gsub(/"[^"]*"/, "", body)
+           if (body ~ /\+[[:space:]]*[A-Za-z_$]/) print line }')
+report "clause SQL dynamique (where/ownerCheck/conditions) avec valeur non paramétrée" "$out"
 # SCOUT : outil interne. Ignorés : agent/données SCOUT, constantes SCOUT_*, tags de log [SCOUT],
 # et toute ligne située dans une route Express réservée au seul rôle admin.
 out=$(awk '

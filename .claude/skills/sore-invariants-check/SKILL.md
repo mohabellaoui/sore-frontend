@@ -23,6 +23,7 @@ Pour chaque route ajoutée ou modifiée dans le diff :
 - [ ] Guard métier appelé côté route **et** côté agent si scope/autorisation (cf. `assertScopeApproved`)
 - [ ] Entrée CHRONICLE pour l'action
 - [ ] Test d'intégration couvrant le 404 cross-tenant
+- [ ] Toute nouvelle valeur interpolée dans du SQL passe par $${params.push(...)}. La liste blanche (where, ownerCheck, constantes en MAJUSCULES) n'est jamais un raccourci pour une valeur utilisateur.
 
 ## 3. Référence des invariants
 | Invariant | Raison |
