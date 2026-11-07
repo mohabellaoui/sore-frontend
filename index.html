@@ -9264,7 +9264,7 @@ function displaySentinelTriage(triage) {
       <div style="display:flex;justify-content:space-between;align-items:center;
                   border-top:1px solid var(--line);padding-top:16px">
         <div style="font-size:11px;color:var(--text-dim)">
-          SENTINEL v${triage.metadata?.agentVersion?.split('-')[1] || '1.0'} · ${escHtml(triage.metadata?.engine)}
+          SENTINEL v${triage.metadata?.agentVersion?.split('-')[1] || '1.0'} · IA Sore Security
         </div>
         <button onclick="this.closest('[style*=fixed]').remove()"
           style="background:var(--green-dim);color:var(--green);border:1px solid var(--green);
@@ -9373,7 +9373,7 @@ function displayScribeReport(report) {
                   border-top:1px solid var(--line);padding-top:16px">
         <div style="font-size:11px;color:var(--text-dim)">
           Généré par SCRIBE v${report.metadata?.agentVersion?.split('-')[1] || '1.0'} · 
-          ${escHtml(report.metadata?.engine || 'IA Sore Security')}
+          IA Sore Security
         </div>
         <button onclick="this.closest('[style*=fixed]').remove()"
           style="background:var(--cyan-dim);color:var(--cyan);border:1px solid var(--cyan);
