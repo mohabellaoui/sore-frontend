@@ -99,11 +99,14 @@ report "clause SQL dynamique (where/ownerCheck/conditions) avec valeur non param
 #   (b) TABLE_EN_MAJUSCULES[variable] (variable intermédiaire issue de req.*)
 # Exclusions (b) : clés internes vérifiées une à une (pas d'entrée de requête) —
 #   SECRET_TYPE_TO_REGEX, TECH_EOL_MIN_VERSION, TYPOSQUAT_HOMOGLYPHS, QUESTIONS,
-#   SEVERITY_TO_RISK_SCORE, ALERT_SEVERITY_RANK, SEVERITY_RANK, MISP_ATTR_TYPE_MAP,
+#   SEVERITY_TO_RISK_SCORE, ALERT_SEVERITY_RANK, SEVERITY_RANK,
 #   ABUSEIPDB_CATEGORIES, RISK_TO_SEVERITY, PACKS, PACK_DESCRIPTIONS, NEGATIVE_CONTEXTS,
 #   TASK_STATUS_TRANSITIONS, AUGUR_ENUMS, REPORT_TYPE_LABELS, QA_TABLES ;
-#   TEMPLATE_CATEGORIES[c] dans perseus.js hors filtre = c déjà filtré par hasOwn.
-LOOKUP_INTERNAL='(SECRET_TYPE_TO_REGEX|TECH_EOL_MIN_VERSION|TYPOSQUAT_HOMOGLYPHS|QUESTIONS|SEVERITY_TO_RISK_SCORE|ALERT_SEVERITY_RANK|SEVERITY_RANK|MISP_ATTR_TYPE_MAP|ABUSEIPDB_CATEGORIES|RISK_TO_SEVERITY|PACKS|PACK_DESCRIPTIONS|NEGATIVE_CONTEXTS|TASK_STATUS_TRANSITIONS|AUGUR_ENUMS|REPORT_TYPE_LABELS|QA_TABLES)\['
+#   perseus.js `.map(c => TEMPLATE_CATEGORIES[c])` = c déjà filtré par hasOwn (ou défaut
+#   interne). Le FILTRE lui-même (`.filter(c => TEMPLATE_CATEGORIES[c])`) n'est PAS exclu.
+#   misp.js `MISP_ATTR_TYPE_MAP[attr.type]` = attr issu de `attributes`, déjà filtré par
+#   isKnownMispAttrType (hasOwn). Toute AUTRE lecture de MISP_ATTR_TYPE_MAP reste contrôlée.
+LOOKUP_INTERNAL='(SECRET_TYPE_TO_REGEX|TECH_EOL_MIN_VERSION|TYPOSQUAT_HOMOGLYPHS|QUESTIONS|SEVERITY_TO_RISK_SCORE|ALERT_SEVERITY_RANK|SEVERITY_RANK|ABUSEIPDB_CATEGORIES|RISK_TO_SEVERITY|PACKS|PACK_DESCRIPTIONS|NEGATIVE_CONTEXTS|TASK_STATUS_TRANSITIONS|AUGUR_ENUMS|REPORT_TYPE_LABELS|QA_TABLES)\['
 out=$(awk '
   FNR==1 { prev = "" }
   { line = $0
@@ -114,7 +117,8 @@ out=$(awk '
     prev = line }' "${FILES[@]}" 2>/dev/null \
   | grep -vE "$COMMENT_RE" \
   | grep -vE "^[^:]+:[0-9]+:@B@.*$LOOKUP_INTERNAL" \
-  | grep -vE '^src/agents/perseus\.js:[0-9]+:@B@.*TEMPLATE_CATEGORIES\[c\]' \
+  | grep -vE '^src/agents/perseus\.js:[0-9]+:@B@.*\.map\(c => TEMPLATE_CATEGORIES\[c\]\)' \
+  | grep -vE '^src/agents/misp\.js:[0-9]+:@B@[[:space:]]*const iocType = MISP_ATTR_TYPE_MAP\[attr\.type\];' \
   | sed -E 's/@B@//')
 # argus.js listExposures : hasOwn dans le `if` deux lignes au-dessus (if multi-lignes).
 out=$(printf '%s' "$out" | grep -vE '^src/agents/argus\.js:[0-9]+:[[:space:]]*conditions\.push\(severityRanges\[severity\]\)')
